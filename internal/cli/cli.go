@@ -264,12 +264,22 @@ func (e env) runStatus() error {
 	if status.LastSyncRun != nil {
 		ckStatus.LastSyncAt = status.LastSyncRun.FinishedAt
 	}
+	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
 	return e.write("status", map[string]any{
 		"control": ckStatus,
 		"archive": status,
 		"source": map[string]any{
 			"desktop_macos": map[string]any{
+				"app_path":                 disc.AppPath,
+				"app_version":              disc.AppVersion,
+				"bundle_id":                disc.BundleID,
+				"bundle_version":           disc.BundleVersion,
+				"running":                  disc.Running,
 				"container_path":           e.loaded.Config.DesktopMacOS.ContainerPath,
+				"container_present":        disc.ContainerPresent,
+				"profile_count":            len(disc.ProfileRoots),
+				"database_count":           disc.DatabaseCount,
+				"encrypted_database_count": disc.EncryptedDBCount,
 				"keep_source_snapshots":    e.loaded.Config.DesktopMacOS.KeepSourceSnapshots,
 				"keep_decrypted_snapshots": e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots,
 			},

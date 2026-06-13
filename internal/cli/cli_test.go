@@ -120,6 +120,16 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(archiveStatus["moment_count"].(float64)); got != 1 {
 		t.Fatalf("moment_count = %d, status=%#v", got, archiveStatus)
 	}
+	sourceStatus := status["source"].(map[string]any)["desktop_macos"].(map[string]any)
+	if got := int(sourceStatus["profile_count"].(float64)); got != 1 {
+		t.Fatalf("source profile_count = %d, source=%#v", got, sourceStatus)
+	}
+	if got := int(sourceStatus["database_count"].(float64)); got != 1 {
+		t.Fatalf("source database_count = %d, source=%#v", got, sourceStatus)
+	}
+	if _, ok := sourceStatus["app_version"]; !ok {
+		t.Fatalf("source app_version missing: %#v", sourceStatus)
+	}
 
 	code, out, errOut = runForTest("--json", "search", "航班")
 	if code != 0 {
