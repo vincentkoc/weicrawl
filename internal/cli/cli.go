@@ -321,6 +321,9 @@ func (e env) runUnlock(args []string) error {
 	storeKeychain := fs.Bool("store-keychain", false, "persist unlock material in keychain")
 	once := fs.Bool("once", false, "memory only")
 	explain := fs.Bool("explain", false, "explain planned method")
+	script := fs.String("script", "", "key scanner script path")
+	outputPath := fs.String("scan-out", "wechat_keys.json", "expected key manifest path")
+	execute := fs.Bool("execute", false, "run the key scanner instead of printing the plan")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -359,6 +362,19 @@ func (e env) runUnlock(args []string) error {
 			return err
 		}
 		return e.write("unlock", result)
+	case "scan-keys":
+		plan, err := unlock.BuildKeyScanPlan(*allowProcess, *execute, config.Expand(*script), config.Expand(*outputPath))
+		if err != nil {
+			return err
+		}
+		if !*execute {
+			return e.write("unlock", plan)
+		}
+		out, err := unlock.ExecuteKeyScan(e.ctx, plan)
+		if err != nil {
+			return fmt.Errorf("key scan failed: %w\n%s", err, strings.TrimSpace(string(out)))
+		}
+		return e.write("unlock", map[string]any{"command": plan.Command, "output": strings.TrimSpace(string(out))})
 	case "forget":
 		payload["forgotten"] = true
 	default:

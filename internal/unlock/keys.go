@@ -40,6 +40,50 @@ type DecryptEntry struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
+type KeyScanPlan struct {
+	Allowed bool     `json:"allowed"`
+	Execute bool     `json:"execute"`
+	Command []string `json:"command"`
+	Notes   []string `json:"notes,omitempty"`
+}
+
+func BuildKeyScanPlan(allowProcessInspect, execute bool, scriptPath, outputPath string) (KeyScanPlan, error) {
+	plan := KeyScanPlan{
+		Allowed: allowProcessInspect,
+		Execute: execute,
+		Notes: []string{
+			"requires WeChat running",
+			"may require SIP/debug permissions depending on macOS setup",
+			"writes a wechat_keys.json-style manifest; do not commit it",
+		},
+	}
+	if !allowProcessInspect {
+		return plan, errors.New("refusing process inspection without --allow-process-inspect")
+	}
+	if strings.TrimSpace(scriptPath) == "" {
+		scriptPath = "find_key_memscan.py"
+	}
+	if strings.TrimSpace(outputPath) == "" {
+		outputPath = "wechat_keys.json"
+	}
+	plan.Command = []string{"python3", scriptPath}
+	plan.Notes = append(plan.Notes, "run from the key extractor directory or pass --script")
+	plan.Notes = append(plan.Notes, "expected output: "+outputPath)
+	return plan, nil
+}
+
+func ExecuteKeyScan(ctx context.Context, plan KeyScanPlan) ([]byte, error) {
+	if !plan.Allowed {
+		return nil, errors.New("key scan is not allowed")
+	}
+	if len(plan.Command) == 0 {
+		return nil, errors.New("key scan command is empty")
+	}
+	cmd := exec.CommandContext(ctx, plan.Command[0], plan.Command[1:]...)
+	cmd.Env = os.Environ()
+	return cmd.CombinedOutput()
+}
+
 func ReadKeyManifest(path string) (KeyManifest, error) {
 	bytes, err := os.ReadFile(path)
 	if err != nil {

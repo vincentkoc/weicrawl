@@ -28,6 +28,7 @@ Implemented:
   - `Name2Id`
   - `Msg_<md5(username)>`
 - `wechat_keys.json` manifest decrypt workflow using `sqlcipher`
+- explicit `unlock scan-keys` planner/wrapper for reviewed external extractors
 - official-account token and news-material ingestion path
 - synthetic e2e coverage
 
@@ -53,12 +54,16 @@ were imported.
 
 ## decrypt/import flow
 
-`weicrawl` does not attach to WeChat or scan process memory. Use a reviewed
-external key-extraction path to produce `wechat_keys.json`, then decrypt the
-copied snapshot:
+`weicrawl` does not attach to WeChat or scan process memory by default. Use a
+reviewed external key-extraction path to produce `wechat_keys.json`, then
+decrypt the copied snapshot:
 
 ```bash
 brew install sqlcipher
+
+go run ./cmd/weicrawl --json unlock scan-keys \
+  --allow-process-inspect \
+  --script /path/to/find_key_memscan.py
 
 go run ./cmd/weicrawl --json sync \
   --source desktop-macos \

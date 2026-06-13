@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -260,6 +261,73 @@ func TestCLISyncDecryptedDir(t *testing.T) {
 	}
 }
 
+func TestCLIUnlockDecryptThenSyncEncryptedFixture(t *testing.T) {
+	sqlcipher, err := exec.LookPath("sqlcipher")
+	if err != nil {
+		sqlcipher = "/opt/homebrew/opt/sqlcipher/bin/sqlcipher"
+		if _, statErr := os.Stat(sqlcipher); statErr != nil {
+			t.Skip("sqlcipher unavailable")
+		}
+	}
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	plain := filepath.Join(root, "plain.db")
+	createNativeMessageDB(t, plain, "alice")
+	snapshotRoot := filepath.Join(root, "snapshot")
+	encrypted := filepath.Join(snapshotRoot, "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(encrypted), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	encryptSQLiteFixture(t, sqlcipher, plain, encrypted, key)
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"message/message_0.db":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	decryptedDir := filepath.Join(root, "decrypted")
+	code, out, errOut := runForTest("--json", "unlock", "desktop", "--keys", keysPath, "--snapshot", snapshotRoot, "--out", decryptedDir)
+	if code != 0 {
+		t.Fatalf("unlock code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	code, out, errOut = runForTest("--json", "init")
+	if code != 0 {
+		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	code, out, errOut = runForTest("--json", "sync", "--source", "desktop-macos", "--profile", "profile-decrypted", "--decrypted-dir", decryptedDir)
+	if code != 0 {
+		t.Fatalf("sync code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if got := int(payload["imported_messages"].(float64)); got != 1 {
+		t.Fatalf("imported_messages = %d, payload=%#v", got, payload)
+	}
+}
+
+func TestCLIKeyScanRequiresExplicitProcessInspect(t *testing.T) {
+	code, _, errOut := runForTest("--json", "unlock", "scan-keys")
+	if code == 0 {
+		t.Fatal("scan-keys succeeded without --allow-process-inspect")
+	}
+	if !strings.Contains(errOut.String(), "--allow-process-inspect") {
+		t.Fatalf("stderr = %s", errOut.String())
+	}
+	code, out, errOut := runForTest("--json", "unlock", "scan-keys", "--allow-process-inspect", "--script", "/tmp/find_key_memscan.py")
+	if code != 0 {
+		t.Fatalf("scan plan code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var plan map[string]any
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan["execute"].(bool) {
+		t.Fatalf("plan unexpectedly executes: %#v", plan)
+	}
+}
+
 func runForTest(args ...string) (int, *bytes.Buffer, *bytes.Buffer) {
 	var stdout, stderr bytes.Buffer
 	code := Main(args, &stdout, &stderr)
@@ -323,6 +391,19 @@ func openFixtureDB(t *testing.T, path string) *sql.DB {
 func nativeMsgTable(username string) string {
 	sum := md5.Sum([]byte(username))
 	return "Msg_" + hex.EncodeToString(sum[:])
+}
+
+func encryptSQLiteFixture(t *testing.T, sqlcipher, src, dst, key string) {
+	t.Helper()
+	cmd := exec.Command(sqlcipher, src)
+	cmd.Stdin = strings.NewReader(`ATTACH DATABASE '` + dst + `' AS encrypted KEY "x'` + key + `'";
+SELECT sqlcipher_export('encrypted');
+DETACH DATABASE encrypted;
+`)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("encrypt fixture: %v\n%s", err, out)
+	}
 }
 
 func createFixtureDB(t *testing.T, path string) {
