@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -495,17 +496,24 @@ func (e env) runSnapshot(args []string) error {
 
 func (e env) runSnapshotImport(args []string) error {
 	fs := newFlagSet("import")
+	format := fs.String("format", "snapshot", "snapshot or jsonl")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return output.UsageError{Err: errors.New("snapshot path is required")}
+		return output.UsageError{Err: errors.New("import path is required")}
 	}
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
 	}
 	defer arc.Close()
+	if *format == "jsonl" {
+		return e.importJSONL(arc, config.Expand(fs.Arg(0)))
+	}
+	if *format != "snapshot" {
+		return output.UsageError{Err: fmt.Errorf("unsupported import format %q", *format)}
+	}
 	manifest, err := snapshot.Import(e.ctx, snapshot.ImportOptions{DB: arc.DB(), RootDir: config.Expand(fs.Arg(0)), DeleteTables: schema.SnapshotTables})
 	if err != nil {
 		return err
@@ -514,6 +522,167 @@ func (e env) runSnapshotImport(args []string) error {
 		return err
 	}
 	return e.write("import", manifest)
+}
+
+type jsonlImportResult struct {
+	Source string         `json:"source"`
+	Path   string         `json:"path"`
+	Rows   int            `json:"rows"`
+	Counts map[string]int `json:"counts"`
+}
+
+type importEntity struct {
+	Table   string
+	Columns []string
+}
+
+func (e env) importJSONL(arc *archive.Archive, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	entities := importEntities()
+	result := jsonlImportResult{Source: "import-jsonl", Path: path, Counts: map[string]int{}}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
+	line := 0
+	for scanner.Scan() {
+		line++
+		var row map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+			return fmt.Errorf("decode jsonl line %d: %w", line, err)
+		}
+		entityName := strings.TrimSpace(fmt.Sprint(row["entity"]))
+		entity, ok := entities[entityName]
+		if !ok {
+			return fmt.Errorf("unsupported jsonl entity %q on line %d", entityName, line)
+		}
+		if err := insertJSONLEntity(e.ctx, arc, entity, row); err != nil {
+			return fmt.Errorf("import %s line %d: %w", entityName, line, err)
+		}
+		result.Rows++
+		result.Counts[entityName]++
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if err := arc.RebuildFTS(e.ctx); err != nil {
+		return err
+	}
+	started := time.Now().UTC()
+	if err := arc.InsertSyncRun(e.ctx, archive.SyncRun{
+		RunID:              "import-" + started.Format("20060102T150405.000000000Z"),
+		Source:             result.Source,
+		StartedAt:          started.Format(time.RFC3339),
+		FinishedAt:         time.Now().UTC().Format(time.RFC3339),
+		Status:             "success",
+		SourceRoot:         path,
+		ImportedProfiles:   int64(result.Counts["profile"]),
+		ImportedContacts:   int64(result.Counts["contact"]),
+		ImportedChats:      int64(result.Counts["chat"]),
+		ImportedMessages:   int64(result.Counts["message"]),
+		ImportedMedia:      int64(result.Counts["media"]),
+		ImportedRawRecords: int64(result.Counts["raw_record"]),
+	}); err != nil {
+		return err
+	}
+	return e.write("import", result)
+}
+
+func importEntities() map[string]importEntity {
+	return map[string]importEntity{
+		"profile": {
+			Table:   "profiles",
+			Columns: []string{"profile_id", "wxid", "display_name", "source_root", "app_version", "raw_json", "updated_at"},
+		},
+		"contact": {
+			Table:   "contacts",
+			Columns: []string{"profile_id", "contact_id", "alias", "display_name", "remark_name", "kind", "avatar_ref", "raw_json", "updated_at"},
+		},
+		"chat": {
+			Table:   "chats",
+			Columns: []string{"profile_id", "chat_id", "kind", "title", "last_message_at", "unread_count", "muted", "pinned", "raw_json", "updated_at"},
+		},
+		"chat_member": {
+			Table:   "chat_members",
+			Columns: []string{"profile_id", "chat_id", "contact_id", "display_name", "raw_json", "updated_at"},
+		},
+		"message": {
+			Table:   "messages",
+			Columns: []string{"profile_id", "message_id", "chat_id", "sender_id", "direction", "message_type", "sent_at", "edited_at", "deleted_at", "text", "normalized_text", "source_db", "source_rowid", "raw_json", "updated_at"},
+		},
+		"message_part": {
+			Table:   "message_parts",
+			Columns: []string{"profile_id", "message_id", "part_index", "kind", "text", "media_id", "url", "raw_json"},
+		},
+		"message_event": {
+			Table:   "message_events",
+			Columns: []string{"event_id", "profile_id", "chat_id", "message_id", "event_type", "event_at", "payload_json"},
+		},
+		"media": {
+			Table:   "media_items",
+			Columns: []string{"profile_id", "media_id", "kind", "source_path", "archive_path", "mime_type", "byte_size", "sha256", "width", "height", "duration_ms", "raw_json", "updated_at"},
+		},
+		"favorite": {
+			Table:   "favorites",
+			Columns: []string{"profile_id", "favorite_id", "kind", "title", "text", "source_ref", "raw_json", "updated_at"},
+		},
+		"biz_account": {
+			Table:   "biz_accounts",
+			Columns: []string{"profile_id", "account_id", "display_name", "raw_json", "updated_at"},
+		},
+		"article": {
+			Table:   "biz_articles",
+			Columns: []string{"profile_id", "article_id", "account_id", "title", "url", "summary", "published_at", "raw_json", "updated_at"},
+		},
+		"moment": {
+			Table:   "moments",
+			Columns: []string{"profile_id", "moment_id", "author_id", "text", "created_at", "raw_json", "updated_at"},
+		},
+		"raw_record": {
+			Table:   "raw_records",
+			Columns: []string{"id", "profile_id", "source_name", "source_table", "source_key", "record_kind", "payload_json", "observed_at"},
+		},
+	}
+}
+
+func insertJSONLEntity(ctx context.Context, arc *archive.Archive, entity importEntity, row map[string]any) error {
+	columns := make([]string, 0, len(entity.Columns))
+	placeholders := make([]string, 0, len(entity.Columns))
+	values := make([]any, 0, len(entity.Columns))
+	for _, column := range entity.Columns {
+		value, ok := row[column]
+		if !ok {
+			continue
+		}
+		columns = append(columns, quoteSQLIdent(column))
+		placeholders = append(placeholders, "?")
+		values = append(values, normalizeJSONLValue(value))
+	}
+	if len(columns) == 0 {
+		return errors.New("no importable columns")
+	}
+	query := "insert or replace into " + quoteSQLIdent(entity.Table) + "(" + strings.Join(columns, ",") + ") values(" + strings.Join(placeholders, ",") + ")"
+	_, err := arc.DB().ExecContext(ctx, query, values...)
+	return err
+}
+
+func normalizeJSONLValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any, []any:
+		bytes, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+		return string(bytes)
+	default:
+		return v
+	}
+}
+
+func quoteSQLIdent(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func (e env) runExport(args []string) error {

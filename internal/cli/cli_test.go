@@ -182,6 +182,28 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if counts["message"] != 2 || counts["favorite"] != 0 {
 		t.Fatalf("messages scope counts=%#v", counts)
 	}
+	jsonlImportDB := filepath.Join(root, "jsonl-imported.db")
+	code, out, errOut = runForTest("--json", "--db", jsonlImportDB, "import", "--format", "jsonl", jsonlPath)
+	if code != 0 {
+		t.Fatalf("jsonl import code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var imported map[string]any
+	if err := json.Unmarshal(out.Bytes(), &imported); err != nil {
+		t.Fatal(err)
+	}
+	if got := int(imported["rows"].(float64)); got < 9 {
+		t.Fatalf("jsonl imported rows = %d, payload=%#v", got, imported)
+	}
+	code, out, errOut = runForTest("--json", "--db", jsonlImportDB, "search", "boarding")
+	if code != 0 {
+		t.Fatalf("jsonl search code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &search); err != nil {
+		t.Fatal(err)
+	}
+	if hits := search["hits"].([]any); len(hits) < 2 {
+		t.Fatalf("jsonl search hits = %#v", hits)
+	}
 
 	snapshotDir := filepath.Join(root, "snapshot")
 	code, out, errOut = runForTest("--json", "snapshot", "create", "--out", snapshotDir)
