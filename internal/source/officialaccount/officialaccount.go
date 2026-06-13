@@ -28,14 +28,16 @@ type Options struct {
 }
 
 type Result struct {
-	RunID       string   `json:"run_id"`
-	Source      string   `json:"source"`
-	Status      string   `json:"status"`
-	TokenProbed bool     `json:"token_probed"`
-	ExpiresIn   int64    `json:"expires_in,omitempty"`
-	Accounts    int64    `json:"accounts,omitempty"`
-	Articles    int64    `json:"articles,omitempty"`
-	Warnings    []string `json:"warnings,omitempty"`
+	RunID             string   `json:"run_id"`
+	Source            string   `json:"source"`
+	Status            string   `json:"status"`
+	TokenProbed       bool     `json:"token_probed"`
+	TokenCacheSafe    bool     `json:"token_cache_safe"`
+	RawTokenPersisted bool     `json:"raw_token_persisted"`
+	ExpiresIn         int64    `json:"expires_in,omitempty"`
+	Accounts          int64    `json:"accounts,omitempty"`
+	Articles          int64    `json:"articles,omitempty"`
+	Warnings          []string `json:"warnings,omitempty"`
 }
 
 type tokenResponse struct {
@@ -43,6 +45,13 @@ type tokenResponse struct {
 	ExpiresIn   int64  `json:"expires_in"`
 	ErrCode     int64  `json:"errcode"`
 	ErrMsg      string `json:"errmsg"`
+}
+
+type tokenCacheState struct {
+	ExpiresIn         int64  `json:"expires_in"`
+	ExpiresAt         string `json:"expires_at,omitempty"`
+	Policy            string `json:"policy"`
+	RawTokenPersisted bool   `json:"raw_token_persisted"`
 }
 
 type materialListResponse struct {
@@ -76,7 +85,7 @@ type newsItem struct {
 func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, error) {
 	started := time.Now().UTC()
 	runID := "official-" + started.Format("20060102T150405.000000000Z")
-	result := Result{RunID: runID, Source: "official-account-api", Status: "skipped"}
+	result := Result{RunID: runID, Source: "official-account-api", Status: "skipped", TokenCacheSafe: true}
 	appID := strings.TrimSpace(os.Getenv(opts.Config.AppIDEnv))
 	appSecret := strings.TrimSpace(os.Getenv(opts.Config.AppSecretEnv))
 	if appID == "" || appSecret == "" {
@@ -154,7 +163,11 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 			}
 		}
 	}
-	if _, err := arc.DB().ExecContext(ctx, `insert or replace into sync_state(source_name, entity_type, entity_id, value, updated_at) values('official-account-api', 'token', 'access_token', ?, ?)`, fmt.Sprintf("expires_in=%d", token.ExpiresIn), time.Now().UTC().Format(time.RFC3339)); err != nil {
+	state, err := marshalTokenCacheState(token, time.Now().UTC())
+	if err != nil {
+		return result, err
+	}
+	if _, err := arc.DB().ExecContext(ctx, `insert or replace into sync_state(source_name, entity_type, entity_id, value, updated_at) values('official-account-api', 'token', 'access_token', ?, ?)`, state, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		return result, err
 	}
 	return result, arc.InsertSyncRun(ctx, archive.SyncRun{
@@ -169,6 +182,22 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 		ImportedArticles:    result.Articles,
 		Warnings:            result.Warnings,
 	})
+}
+
+func marshalTokenCacheState(token tokenResponse, observedAt time.Time) (string, error) {
+	state := tokenCacheState{
+		ExpiresIn:         token.ExpiresIn,
+		Policy:            "metadata-only",
+		RawTokenPersisted: false,
+	}
+	if token.ExpiresIn > 0 {
+		state.ExpiresAt = observedAt.Add(time.Duration(token.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+	}
+	bytes, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
 }
 
 var officialSecretRE = regexp.MustCompile(`(?i)(access_token|secret)=([^&\s"]+)`)

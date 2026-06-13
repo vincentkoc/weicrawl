@@ -2,6 +2,7 @@ package officialaccount
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -66,6 +67,9 @@ func TestSyncFetchesNewsMaterialsWithoutPersistingToken(t *testing.T) {
 	if result.Accounts != 1 || result.Articles != 1 || result.Status != "success" {
 		t.Fatalf("result = %#v", result)
 	}
+	if !result.TokenCacheSafe || result.RawTokenPersisted {
+		t.Fatalf("unsafe token cache posture: %#v", result)
+	}
 	status, err := arc.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +86,18 @@ func TestSyncFetchesNewsMaterialsWithoutPersistingToken(t *testing.T) {
 	}
 	if len(rows.Values) != 1 || strings.Contains(rows.Values[0]["value"].(string), "token-value") {
 		t.Fatalf("sync state leaked token: %#v", rows.Values)
+	}
+	var tokenState struct {
+		ExpiresIn         int64  `json:"expires_in"`
+		ExpiresAt         string `json:"expires_at"`
+		Policy            string `json:"policy"`
+		RawTokenPersisted bool   `json:"raw_token_persisted"`
+	}
+	if err := json.Unmarshal([]byte(rows.Values[0]["value"].(string)), &tokenState); err != nil {
+		t.Fatalf("sync state is not structured token metadata: %v", err)
+	}
+	if tokenState.ExpiresIn != 7200 || tokenState.ExpiresAt == "" || tokenState.Policy != "metadata-only" || tokenState.RawTokenPersisted {
+		t.Fatalf("unexpected token cache state: %#v", tokenState)
 	}
 }
 
