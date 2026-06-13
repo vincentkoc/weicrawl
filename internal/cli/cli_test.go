@@ -348,6 +348,44 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if imported["source"] != "import-jsonl" {
 		t.Fatalf("sync import payload=%#v", imported)
 	}
+	syncSinceDB := filepath.Join(root, "sync-imported-since.db")
+	code, out, errOut = runForTest("--json", "--db", syncSinceDB, "init")
+	if code != 0 {
+		t.Fatalf("sync since init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	code, out, errOut = runForTest("--json", "--db", syncSinceDB, "sync", "--source", "import", "--import-path", jsonlPath, "--since", "2026-06-13T01:30:00Z")
+	if code != 0 {
+		t.Fatalf("sync import since code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &imported); err != nil {
+		t.Fatal(err)
+	}
+	importCounts := imported["counts"].(map[string]any)
+	if got := int(importCounts["message"].(float64)); got != 1 {
+		t.Fatalf("sync import since message count = %d, payload=%#v", got, imported)
+	}
+	if got := int(importCounts["message_part"].(float64)); got != 1 {
+		t.Fatalf("sync import since message_part count = %d, payload=%#v", got, imported)
+	}
+	if got := int(importCounts["message_event"].(float64)); got != 1 {
+		t.Fatalf("sync import since message_event count = %d, payload=%#v", got, imported)
+	}
+	if got := int(importCounts["favorite"].(float64)); got != 1 {
+		t.Fatalf("sync import since favorite count = %d, payload=%#v", got, imported)
+	}
+	if got := int(importCounts["moment"].(float64)); got != 1 {
+		t.Fatalf("sync import since moment count = %d, payload=%#v", got, imported)
+	}
+	code, out, errOut = runForTest("--json", "--db", syncSinceDB, "search", "hello from fixture")
+	if code != 0 {
+		t.Fatalf("sync import since old search code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &search); err != nil {
+		t.Fatal(err)
+	}
+	if hits := search["hits"].([]any); len(hits) != 0 {
+		t.Fatalf("sync import since old hits = %#v", hits)
+	}
 
 	snapshotDir := filepath.Join(root, "snapshot")
 	code, out, errOut = runForTest("--json", "snapshot", "create", "--out", snapshotDir)

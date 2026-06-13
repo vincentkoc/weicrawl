@@ -373,7 +373,7 @@ func (e env) runSync(args []string) error {
 	if *source == "all" && strings.TrimSpace(*importPath) != "" && *importFormat != "jsonl" {
 		return output.UsageError{Err: fmt.Errorf("unsupported import format %q", *importFormat)}
 	}
-	if sinceValue != "" && (*source == "official-account-api" || *source == "import" || (*source == "all" && (e.loaded.Config.OfficialAccount.Enabled || strings.TrimSpace(*importPath) != ""))) {
+	if sinceValue != "" && (*source == "official-account-api" || (*source == "all" && e.loaded.Config.OfficialAccount.Enabled)) {
 		return output.UsageError{Err: fmt.Errorf("--since is not supported with source %q yet", *source)}
 	}
 	opts := syncOptions{
@@ -422,7 +422,7 @@ func (e env) runSync(args []string) error {
 		if opts.ImportFormat != "jsonl" {
 			return output.UsageError{Err: fmt.Errorf("unsupported import format %q", opts.ImportFormat)}
 		}
-		result, err := e.importJSONLResult(arc, config.Expand(opts.ImportPath))
+		result, err := e.importJSONLResult(arc, config.Expand(opts.ImportPath), opts.Since)
 		if err != nil {
 			return err
 		}
@@ -465,7 +465,7 @@ func (e env) runSyncAll(arc *archive.Archive, opts syncOptions) error {
 			if opts.ImportFormat != "jsonl" {
 				return nil, output.UsageError{Err: fmt.Errorf("unsupported import format %q", opts.ImportFormat)}
 			}
-			return e.importJSONLResult(arc, config.Expand(opts.ImportPath))
+			return e.importJSONLResult(arc, config.Expand(opts.ImportPath), opts.Since)
 		})
 	}
 	result.Status = aggregateSyncStatus(result.Results, len(result.Errors))
@@ -818,6 +818,7 @@ func (e env) runSnapshot(args []string) error {
 func (e env) runSnapshotImport(args []string) error {
 	fs := newFlagSet("import")
 	format := fs.String("format", "snapshot", "snapshot or jsonl")
+	since := fs.String("since", "", "lower bound timestamp for jsonl imports")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -830,7 +831,14 @@ func (e env) runSnapshotImport(args []string) error {
 	}
 	defer arc.Close()
 	if *format == "jsonl" {
-		return e.importJSONL(arc, config.Expand(fs.Arg(0)))
+		sinceValue, err := parseSince(*since)
+		if err != nil {
+			return output.UsageError{Err: err}
+		}
+		return e.importJSONL(arc, config.Expand(fs.Arg(0)), sinceValue)
+	}
+	if strings.TrimSpace(*since) != "" {
+		return output.UsageError{Err: errors.New("--since is only supported for jsonl imports")}
 	}
 	if *format != "snapshot" {
 		return output.UsageError{Err: fmt.Errorf("unsupported import format %q", *format)}
@@ -846,10 +854,12 @@ func (e env) runSnapshotImport(args []string) error {
 }
 
 type jsonlImportResult struct {
-	Source string         `json:"source"`
-	Path   string         `json:"path"`
-	Rows   int            `json:"rows"`
-	Counts map[string]int `json:"counts"`
+	Source  string         `json:"source"`
+	Path    string         `json:"path"`
+	Since   string         `json:"since,omitempty"`
+	Rows    int            `json:"rows"`
+	Skipped int            `json:"skipped,omitempty"`
+	Counts  map[string]int `json:"counts"`
 }
 
 type importEntity struct {
@@ -857,25 +867,26 @@ type importEntity struct {
 	Columns []string
 }
 
-func (e env) importJSONL(arc *archive.Archive, path string) error {
-	result, err := e.importJSONLResult(arc, path)
+func (e env) importJSONL(arc *archive.Archive, path, since string) error {
+	result, err := e.importJSONLResult(arc, path, since)
 	if err != nil {
 		return err
 	}
 	return e.write("import", result)
 }
 
-func (e env) importJSONLResult(arc *archive.Archive, path string) (jsonlImportResult, error) {
+func (e env) importJSONLResult(arc *archive.Archive, path, since string) (jsonlImportResult, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return jsonlImportResult{}, err
 	}
 	defer file.Close()
 	entities := importEntities()
-	result := jsonlImportResult{Source: "import-jsonl", Path: path, Counts: map[string]int{}}
+	result := jsonlImportResult{Source: "import-jsonl", Path: path, Since: since, Counts: map[string]int{}}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	line := 0
+	var rows []map[string]any
 	for scanner.Scan() {
 		line++
 		var row map[string]any
@@ -883,18 +894,27 @@ func (e env) importJSONLResult(arc *archive.Archive, path string) (jsonlImportRe
 			return result, fmt.Errorf("decode jsonl line %d: %w", line, err)
 		}
 		entityName := strings.TrimSpace(fmt.Sprint(row["entity"]))
-		entity, ok := entities[entityName]
-		if !ok {
+		if _, ok := entities[entityName]; !ok {
 			return result, fmt.Errorf("unsupported jsonl entity %q on line %d", entityName, line)
 		}
-		if err := insertJSONLEntity(e.ctx, arc, entity, row); err != nil {
-			return result, fmt.Errorf("import %s line %d: %w", entityName, line, err)
-		}
-		result.Rows++
-		result.Counts[entityName]++
+		rows = append(rows, row)
 	}
 	if err := scanner.Err(); err != nil {
 		return result, err
+	}
+	keptMessages := jsonlKeptMessages(rows, since)
+	for i, row := range rows {
+		entityName := strings.TrimSpace(fmt.Sprint(row["entity"]))
+		entity := entities[entityName]
+		if !shouldImportJSONLRow(row, since, keptMessages) {
+			result.Skipped++
+			continue
+		}
+		if err := insertJSONLEntity(e.ctx, arc, entity, row); err != nil {
+			return result, fmt.Errorf("import %s line %d: %w", entityName, i+1, err)
+		}
+		result.Rows++
+		result.Counts[entityName]++
 	}
 	if err := arc.RebuildFTS(e.ctx); err != nil {
 		return result, err
@@ -917,6 +937,82 @@ func (e env) importJSONLResult(arc *archive.Archive, path string) (jsonlImportRe
 		return result, err
 	}
 	return result, nil
+}
+
+func jsonlKeptMessages(rows []map[string]any, since string) map[string]bool {
+	kept := map[string]bool{}
+	if strings.TrimSpace(since) == "" {
+		return kept
+	}
+	for _, row := range rows {
+		if strings.TrimSpace(fmt.Sprint(row["entity"])) != "message" {
+			continue
+		}
+		if timestampAtOrAfter(fmt.Sprint(row["sent_at"]), since) {
+			kept[jsonlMessageKey(row)] = true
+		}
+	}
+	return kept
+}
+
+func shouldImportJSONLRow(row map[string]any, since string, keptMessages map[string]bool) bool {
+	since = strings.TrimSpace(since)
+	if since == "" {
+		return true
+	}
+	entityName := strings.TrimSpace(fmt.Sprint(row["entity"]))
+	switch entityName {
+	case "message":
+		return timestampAtOrAfter(fmt.Sprint(row["sent_at"]), since)
+	case "message_part":
+		return keptMessages[jsonlMessageKey(row)]
+	case "message_event":
+		if !timestampAtOrAfter(fmt.Sprint(row["event_at"]), since) {
+			return false
+		}
+		key := jsonlMessageKey(row)
+		return key == "\x00" || keptMessages[key]
+	case "favorite":
+		sourceRef := strings.TrimSpace(fmt.Sprint(row["source_ref"]))
+		if sourceRef == "" {
+			return true
+		}
+		key := jsonlString(row, "profile_id") + "\x00" + sourceRef
+		return keptMessages[key]
+	case "article":
+		return timestampAtOrAfter(fmt.Sprint(row["published_at"]), since)
+	case "moment":
+		return timestampAtOrAfter(fmt.Sprint(row["created_at"]), since)
+	case "raw_record":
+		return timestampAtOrAfter(fmt.Sprint(row["observed_at"]), since)
+	default:
+		return true
+	}
+}
+
+func jsonlMessageKey(row map[string]any) string {
+	return jsonlString(row, "profile_id") + "\x00" + jsonlString(row, "message_id")
+}
+
+func jsonlString(row map[string]any, key string) string {
+	value, ok := row[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
+}
+
+func timestampAtOrAfter(value, since string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return true
+	}
+	valueTime, valueErr := time.Parse(time.RFC3339, value)
+	sinceTime, sinceErr := time.Parse(time.RFC3339, since)
+	if valueErr == nil && sinceErr == nil {
+		return !valueTime.Before(sinceTime)
+	}
+	return value >= since
 }
 
 func importEntities() map[string]importEntity {
