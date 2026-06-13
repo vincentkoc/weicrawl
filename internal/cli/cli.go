@@ -59,6 +59,7 @@ type syncOptions struct {
 	ImportPath    string
 	ImportFormat  string
 	Since         string
+	Concurrency   int
 }
 
 type syncAllResult struct {
@@ -387,6 +388,7 @@ func (e env) runSync(args []string) error {
 		ImportPath:    *importPath,
 		ImportFormat:  *importFormat,
 		Since:         sinceValue,
+		Concurrency:   *concurrency,
 	}
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
@@ -557,6 +559,7 @@ func (e env) syncDesktop(arc *archive.Archive, opts syncOptions) (desktopmac.Syn
 		MediaMode:    opts.MediaMode,
 		Keep:         opts.KeepSource,
 		Since:        opts.Since,
+		Concurrency:  opts.Concurrency,
 	})
 }
 

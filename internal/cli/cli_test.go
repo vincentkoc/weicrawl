@@ -117,12 +117,15 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(metadataOnlyMedia["source_path"]), "sample.txt") {
 		t.Fatalf("metadata-only media source_path missing relative filename: %#v", metadataOnlyMedia)
 	}
-	code, out, errOut = runForTest("--json", "sync", "--profile", "wxid_fixture", "--include-media", "--media-mode", "copy", "--keep-source-snapshot")
+	code, out, errOut = runForTest("--json", "sync", "--profile", "wxid_fixture", "--include-media", "--media-mode", "copy", "--keep-source-snapshot", "--concurrency", "2")
 	if code != 0 {
 		t.Fatalf("sync media copy code=%d stderr=%s stdout=%s", code, errOut, out)
 	}
 	if err := json.Unmarshal(out.Bytes(), &sync); err != nil {
 		t.Fatal(err)
+	}
+	if got := int(sync["concurrency"].(float64)); got != 2 {
+		t.Fatalf("sync concurrency = %d, payload=%#v", got, sync)
 	}
 	mediaSnapshot := fmt.Sprint(sync["snapshot_path"])
 	if mediaSnapshot == "" {

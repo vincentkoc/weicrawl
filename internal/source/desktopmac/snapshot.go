@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vincentkoc/weicrawl/internal/archive"
@@ -25,6 +26,7 @@ type SnapshotOptions struct {
 	MediaMode    string
 	Keep         bool
 	Since        string
+	Concurrency  int
 }
 
 type Snapshot struct {
@@ -52,6 +54,7 @@ type SyncResult struct {
 	Source             string   `json:"source"`
 	Status             string   `json:"status"`
 	Since              string   `json:"since,omitempty"`
+	Concurrency        int      `json:"concurrency,omitempty"`
 	SnapshotPath       string   `json:"snapshot_path,omitempty"`
 	DecryptedSnapshot  string   `json:"decrypted_snapshot_path,omitempty"`
 	SourceDBCount      int      `json:"source_db_count"`
@@ -80,6 +83,10 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 	dbDir := filepath.Join(root, "db_storage")
 	if err := os.MkdirAll(dbDir, 0o700); err != nil {
 		return Snapshot{}, fmt.Errorf("create snapshot dir: %w", err)
+	}
+	concurrency := opts.Concurrency
+	if concurrency < 1 {
+		concurrency = 1
 	}
 	snap := Snapshot{
 		RunID:              runID,
@@ -125,9 +132,9 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 			}
 			dst := filepath.Join(mediaRoot, rel)
 			if opts.MediaMode == "copy" {
-				err = copyDir(dst, dir)
+				err = copyDir(dst, dir, concurrency)
 			} else {
-				err = copyDirMetadataOnly(dst, dir)
+				err = copyDirMetadataOnly(dst, dir, concurrency)
 			}
 			if err != nil {
 				return snap, err
@@ -143,6 +150,9 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 	started := time.Now().UTC()
 	snap, err := CreateSnapshot(ctx, opts)
 	result := SyncResult{Source: "desktop-macos", Since: opts.Since}
+	if opts.Concurrency > 1 {
+		result.Concurrency = opts.Concurrency
+	}
 	if snap.RunID != "" {
 		result.RunID = snap.RunID
 		result.ProfileID = snap.ProfileID
@@ -380,8 +390,15 @@ func ImportMediaMetadata(ctx context.Context, arc *archive.Archive, profileID st
 	return count, nil
 }
 
-func copyDir(dst, src string) error {
-	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+type fileCopyTask struct {
+	src      string
+	dst      string
+	metadata []byte
+}
+
+func copyDir(dst, src string, concurrency int) error {
+	var tasks []fileCopyTask
+	if err := filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry == nil || entry.IsDir() {
 			return nil
 		}
@@ -389,8 +406,12 @@ func copyDir(dst, src string) error {
 		if err != nil {
 			return nil
 		}
-		return copyFile(filepath.Join(dst, rel), path)
-	})
+		tasks = append(tasks, fileCopyTask{src: path, dst: filepath.Join(dst, rel)})
+		return nil
+	}); err != nil {
+		return err
+	}
+	return runCopyTasks(tasks, concurrency)
 }
 
 func mediaKind(path string) string {
@@ -427,8 +448,9 @@ func copyFile(dst, src string) error {
 	return out.Close()
 }
 
-func copyDirMetadataOnly(dst, src string) error {
-	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+func copyDirMetadataOnly(dst, src string, concurrency int) error {
+	var tasks []fileCopyTask
+	if err := filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry == nil || entry.IsDir() {
 			return nil
 		}
@@ -442,11 +464,64 @@ func copyDirMetadataOnly(dst, src string) error {
 		}
 		meta := []byte(fmt.Sprintf("%s\t%d\t%s\n", rel, info.Size(), info.ModTime().UTC().Format(time.RFC3339)))
 		metaPath := filepath.Join(dst, rel+".metadata")
-		if err := os.MkdirAll(filepath.Dir(metaPath), 0o700); err != nil {
+		tasks = append(tasks, fileCopyTask{dst: metaPath, metadata: meta})
+		return nil
+	}); err != nil {
+		return err
+	}
+	return runCopyTasks(tasks, concurrency)
+}
+
+func runCopyTasks(tasks []fileCopyTask, concurrency int) error {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency == 1 || len(tasks) <= 1 {
+		for _, task := range tasks {
+			if err := runCopyTask(task); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if concurrency > len(tasks) {
+		concurrency = len(tasks)
+	}
+	taskCh := make(chan fileCopyTask)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range taskCh {
+				if err := runCopyTask(task); err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, task := range tasks {
+		taskCh <- task
+	}
+	close(taskCh)
+	wg.Wait()
+	return firstErr
+}
+
+func runCopyTask(task fileCopyTask) error {
+	if task.metadata != nil {
+		if err := os.MkdirAll(filepath.Dir(task.dst), 0o700); err != nil {
 			return err
 		}
-		return os.WriteFile(metaPath, meta, 0o600)
-	})
+		return os.WriteFile(task.dst, task.metadata, 0o600)
+	}
+	return copyFile(task.dst, task.src)
 }
 
 func fileSHA256(path string) (string, error) {
