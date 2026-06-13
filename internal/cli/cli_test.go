@@ -62,6 +62,14 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if desktop := doctor["desktop_macos"].(map[string]any); int(desktop["database_count"].(float64)) != 1 {
 		t.Fatalf("doctor desktop = %#v", desktop)
 	}
+	retention := doctor["retention"].(map[string]any)
+	if retention["keep_decrypted_snapshots"].(bool) || !retention["decrypted_retention_safe"].(bool) {
+		t.Fatalf("doctor retention = %#v", retention)
+	}
+	unlockReport := doctor["unlock"].(map[string]any)
+	if !unlockReport["external_key_manifest_supported"].(bool) || unlockReport["external_key_manifest_persistent"].(bool) {
+		t.Fatalf("doctor unlock report = %#v", unlockReport)
+	}
 	if check := doctorCheck(t, doctor, "fts_health"); !check["ok"].(bool) {
 		t.Fatalf("fts check = %#v", check)
 	}

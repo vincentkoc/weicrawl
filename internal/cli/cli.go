@@ -223,6 +223,26 @@ func (e env) runDoctor(args []string) error {
 	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
 	resolvedSQLCipher, sqlcipherErr := unlock.FindSQLCipher(config.Expand(*sqlcipherPath))
 	metadataOK, metadataErr := checkControlMetadata()
+	unlockMethods := configuredUnlockMethods(e.loaded.Config.Unlock)
+	retention := map[string]any{
+		"snapshot_mode":             e.loaded.Config.DesktopMacOS.SnapshotMode,
+		"media_mode":                e.loaded.Config.DesktopMacOS.MediaMode,
+		"keep_source_snapshots":     e.loaded.Config.DesktopMacOS.KeepSourceSnapshots,
+		"keep_decrypted_snapshots":  e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots,
+		"decrypted_retention_safe":  !e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots,
+		"source_snapshot_retention": e.loaded.Config.DesktopMacOS.KeepSourceSnapshots,
+	}
+	unlockReport := map[string]any{
+		"configured":                       len(unlockMethods) > 0,
+		"configured_methods":               unlockMethods,
+		"allow_process_inspect":            e.loaded.Config.Unlock.AllowProcessInspect,
+		"allow_keychain":                   e.loaded.Config.Unlock.AllowKeychain,
+		"store_keychain":                   e.loaded.Config.Unlock.StoreKeychain,
+		"external_key_manifest_supported":  true,
+		"external_key_manifest_persistent": false,
+		"sqlcipher_available":              sqlcipherErr == nil,
+		"sqlcipher_path":                   resolvedSQLCipher,
+	}
 	checks := []map[string]any{
 		{"id": "config_readable", "ok": true, "path": e.loaded.Path},
 		{"id": "archive_db_openable", "ok": dbErr == nil, "path": e.loaded.Config.Archive.DBPath, "error": errString(dbErr)},
@@ -236,9 +256,10 @@ func (e env) runDoctor(args []string) error {
 		{"id": "database_shards", "ok": disc.DatabaseCount > 0, "count": disc.DatabaseCount},
 		{"id": "source_db_encryption_probe", "ok": true, "encrypted_count": disc.EncryptedDBCount, "database_count": disc.DatabaseCount},
 		{"id": "backup_discovery", "ok": true, "backup_dirs": len(disc.BackupDirs)},
-		{"id": "unlock_configured", "ok": e.loaded.Config.Unlock.AllowProcessInspect || e.loaded.Config.Unlock.AllowKeychain || e.loaded.Config.Unlock.StoreKeychain},
+		{"id": "unlock_configured", "ok": len(unlockMethods) > 0, "methods": unlockMethods},
 		{"id": "unlock_key_manifest_supported", "ok": true, "method": "unlock desktop --keys <wechat_keys.json> --snapshot <copied-profile-root> --out <decrypted-dir>"},
 		{"id": "sqlcipher_available", "ok": sqlcipherErr == nil, "path": resolvedSQLCipher, "error": errString(sqlcipherErr)},
+		{"id": "source_snapshot_retention", "ok": true, "enabled": e.loaded.Config.DesktopMacOS.KeepSourceSnapshots, "mode": e.loaded.Config.DesktopMacOS.SnapshotMode},
 		{"id": "decrypted_snapshot_retention", "ok": !e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots, "enabled": e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots},
 		{"id": "probe_unlock_requested", "ok": !*probeUnlock || sqlcipherErr == nil, "skipped": !*probeUnlock, "note": "probe requires sqlcipher and an external key manifest"},
 	}
@@ -278,12 +299,38 @@ func (e env) runDoctor(args []string) error {
 			"error": errString(err),
 		})
 	}
+	warnings := append([]string{}, disc.Warnings...)
+	if e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots {
+		warnings = append(warnings, "decrypted snapshot retention is enabled; decrypted source DB copies may remain on disk")
+	}
 	return e.write("doctor", map[string]any{
-		"state":         "ok",
+		"state": "ok",
+		"config": map[string]any{
+			"path":      e.loaded.Path,
+			"db_path":   e.loaded.Config.Archive.DBPath,
+			"cache_dir": e.loaded.Config.Archive.CacheDir,
+			"log_dir":   e.loaded.Config.Archive.LogDir,
+		},
 		"checks":        checks,
 		"desktop_macos": disc,
-		"warnings":      disc.Warnings,
+		"retention":     retention,
+		"unlock":        unlockReport,
+		"warnings":      warnings,
 	})
+}
+
+func configuredUnlockMethods(cfg config.UnlockConfig) []string {
+	var methods []string
+	if cfg.AllowProcessInspect {
+		methods = append(methods, "process-inspect")
+	}
+	if cfg.AllowKeychain {
+		methods = append(methods, "keychain-read")
+	}
+	if cfg.StoreKeychain {
+		methods = append(methods, "keychain-store")
+	}
+	return methods
 }
 
 func (e env) runStatus() error {
