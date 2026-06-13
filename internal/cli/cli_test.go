@@ -485,6 +485,45 @@ func TestUnlockDesktopExplainWithKeysIsDryRun(t *testing.T) {
 	}
 }
 
+func TestDoctorProbeUnlockChecksManifestSnapshot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	snapshotRoot := filepath.Join(root, "snapshot")
+	snapshotDB := filepath.Join(snapshotRoot, "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(snapshotDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapshotDB, []byte("encrypted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"message/message_0.db":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sqlcipher := filepath.Join(root, "sqlcipher")
+	if err := os.WriteFile(sqlcipher, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runForTest("--json", "doctor", "--probe-unlock", "--keys", keysPath, "--snapshot", snapshotRoot, "--sqlcipher", sqlcipher)
+	if code != 0 {
+		t.Fatalf("doctor code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	check := doctorCheck(t, payload, "unlock_readiness")
+	if !check["ok"].(bool) {
+		t.Fatalf("unlock readiness check = %#v", check)
+	}
+	readiness := check["check"].(map[string]any)
+	if int(readiness["key_count"].(float64)) != 1 {
+		t.Fatalf("readiness = %#v", readiness)
+	}
+}
+
 func TestUnlockForgetReportsNoPersistedMaterial(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))

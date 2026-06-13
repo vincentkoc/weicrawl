@@ -514,7 +514,9 @@ Must check:
 - crawlkit metadata validity
 
 `doctor` must not unlock encrypted data unless explicitly given
-`--probe-unlock`.
+`--probe-unlock`. When `--probe-unlock --keys <manifest> --snapshot
+<copied-profile-root>` is supplied, it should run the same dry-run readiness
+check as `unlock desktop --explain` and still avoid writing decrypted files.
 
 ### `sync`
 

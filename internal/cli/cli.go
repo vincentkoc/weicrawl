@@ -204,6 +204,9 @@ func (e env) runInit(args []string) error {
 func (e env) runDoctor(args []string) error {
 	fs := newFlagSet("doctor")
 	probeUnlock := fs.Bool("probe-unlock", false, "probe configured unlock path")
+	keysPath := fs.String("keys", "", "wechat_keys.json path for unlock probe")
+	snapshotPath := fs.String("snapshot", "", "copied snapshot profile root for unlock probe")
+	sqlcipherPath := fs.String("sqlcipher", "", "sqlcipher binary path for unlock probe")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -217,7 +220,7 @@ func (e env) runDoctor(args []string) error {
 		ftsOK, ftsErr = checkFTSHealth(e.ctx, arc)
 	}
 	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
-	sqlcipherPath, sqlcipherErr := unlock.FindSQLCipher("")
+	resolvedSQLCipher, sqlcipherErr := unlock.FindSQLCipher(config.Expand(*sqlcipherPath))
 	metadataOK, metadataErr := checkControlMetadata()
 	checks := []map[string]any{
 		{"id": "config_readable", "ok": true, "path": e.loaded.Path},
@@ -234,9 +237,22 @@ func (e env) runDoctor(args []string) error {
 		{"id": "backup_discovery", "ok": true, "backup_dirs": len(disc.BackupDirs)},
 		{"id": "unlock_configured", "ok": e.loaded.Config.Unlock.AllowProcessInspect || e.loaded.Config.Unlock.AllowKeychain || e.loaded.Config.Unlock.StoreKeychain},
 		{"id": "unlock_key_manifest_supported", "ok": true, "method": "unlock desktop --keys <wechat_keys.json> --snapshot <copied-profile-root> --out <decrypted-dir>"},
-		{"id": "sqlcipher_available", "ok": sqlcipherErr == nil, "path": sqlcipherPath, "error": errString(sqlcipherErr)},
+		{"id": "sqlcipher_available", "ok": sqlcipherErr == nil, "path": resolvedSQLCipher, "error": errString(sqlcipherErr)},
 		{"id": "decrypted_snapshot_retention", "ok": !e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots, "enabled": e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots},
 		{"id": "probe_unlock_requested", "ok": !*probeUnlock || sqlcipherErr == nil, "skipped": !*probeUnlock, "note": "probe requires sqlcipher and an external key manifest"},
+	}
+	if *probeUnlock && strings.TrimSpace(*keysPath) != "" && strings.TrimSpace(*snapshotPath) != "" {
+		check, err := unlock.CheckSnapshotKeys(unlock.DecryptOptions{
+			SnapshotDir:   config.Expand(*snapshotPath),
+			KeysPath:      config.Expand(*keysPath),
+			SQLCipherPath: config.Expand(*sqlcipherPath),
+		})
+		checks = append(checks, map[string]any{
+			"id":    "unlock_readiness",
+			"ok":    err == nil && check.Ready,
+			"check": check,
+			"error": errString(err),
+		})
 	}
 	return e.write("doctor", map[string]any{
 		"state":         "ok",
