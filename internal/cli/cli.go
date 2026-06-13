@@ -1903,6 +1903,7 @@ func manifest() control.Manifest {
 		"snapshot-export",
 		"tui",
 		"official-account-api",
+		"official-token-metadata-cache",
 	}
 	for _, cmd := range []control.Command{
 		{Title: "Version", Argv: []string{"weicrawl", "--json", "version"}, JSON: true},

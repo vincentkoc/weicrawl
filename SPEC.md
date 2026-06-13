@@ -200,6 +200,9 @@ Auth:
 Rules:
 
 - centralize access-token fetch/cache/refresh
+- treat token cache state as metadata-only unless OS credential storage is
+  explicitly designed later; the archive may record expiry posture, but not the
+  raw access token
 - obey platform rate limits and error codes
 - do not require this adapter for desktop-local archive use
 - keep official-account records distinct from private personal-chat rows

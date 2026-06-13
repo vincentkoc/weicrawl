@@ -33,7 +33,8 @@ Implemented:
   - conservative favorite/moment table shapes when recognizable
 - `wechat_keys.json` manifest decrypt workflow using `sqlcipher`
 - explicit `unlock scan-keys` planner/wrapper for reviewed external extractors
-- official-account token and news-material ingestion path
+- official-account token probe, non-secret token-cache posture, and
+  news-material ingestion path
 - synthetic e2e coverage
 
 Not done until proven live:
@@ -70,6 +71,11 @@ go run ./cmd/weicrawl --json sync --source all --keep-source-snapshot
 when `--import-path` is supplied, and `official-account-api` only when that
 source is enabled in config, so desktop-local syncs do not make surprise network
 calls just because credentials exist in the environment.
+
+Official-account sync fetches an access token in memory for the current run,
+then records only non-secret expiration/cache posture metadata in `sync_state`.
+The raw access token is not persisted in the archive, JSON output, snapshots,
+fixtures, or logs.
 
 Backup or migration directories are only read when selected explicitly:
 
