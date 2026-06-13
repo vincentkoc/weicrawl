@@ -98,6 +98,25 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(sync["imported_media"].(float64)); got != 1 {
 		t.Fatalf("imported_media = %d, sync=%#v", got, sync)
 	}
+	code, out, errOut = runForTest("--json", "media")
+	if code != 0 {
+		t.Fatalf("media list code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var mediaList map[string]any
+	if err := json.Unmarshal(out.Bytes(), &mediaList); err != nil {
+		t.Fatal(err)
+	}
+	mediaValues := mediaList["values"].([]any)
+	if len(mediaValues) != 1 {
+		t.Fatalf("media values = %#v", mediaValues)
+	}
+	metadataOnlyMedia := mediaValues[0].(map[string]any)
+	if metadataOnlyMedia["archive_path"] != nil && fmt.Sprint(metadataOnlyMedia["archive_path"]) != "" {
+		t.Fatalf("metadata-only media should not expose archive_path: %#v", metadataOnlyMedia)
+	}
+	if !strings.Contains(fmt.Sprint(metadataOnlyMedia["source_path"]), "sample.txt") {
+		t.Fatalf("metadata-only media source_path missing relative filename: %#v", metadataOnlyMedia)
+	}
 	code, out, errOut = runForTest("--json", "sync", "--profile", "wxid_fixture", "--include-media", "--media-mode", "copy", "--keep-source-snapshot")
 	if code != 0 {
 		t.Fatalf("sync media copy code=%d stderr=%s stdout=%s", code, errOut, out)
@@ -112,6 +131,17 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	copiedMedia := filepath.Join(mediaSnapshot, "media", "msg", "file", "2026-06", "sample.txt")
 	if bytes, err := os.ReadFile(copiedMedia); err != nil || string(bytes) != "sample media" {
 		t.Fatalf("copied media = %q err=%v", string(bytes), err)
+	}
+	code, out, errOut = runForTest("--json", "media")
+	if code != 0 {
+		t.Fatalf("media list after copy code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &mediaList); err != nil {
+		t.Fatal(err)
+	}
+	copiedMediaRow := mediaList["values"].([]any)[0].(map[string]any)
+	if fmt.Sprint(copiedMediaRow["archive_path"]) != copiedMedia {
+		t.Fatalf("copied media archive_path = %#v want %s", copiedMediaRow, copiedMedia)
 	}
 
 	code, out, errOut = runForTest("--json", "status")

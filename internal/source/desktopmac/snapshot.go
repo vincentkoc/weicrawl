@@ -325,6 +325,7 @@ func ImportMediaMetadata(ctx context.Context, arc *archive.Archive, profileID st
 				rel = filepath.Base(path)
 			}
 			size := int64(0)
+			sourcePath := rel
 			archivePath := path
 			if strings.HasSuffix(entry.Name(), ".metadata") {
 				bytes, err := os.ReadFile(path)
@@ -336,8 +337,9 @@ func ImportMediaMetadata(ctx context.Context, arc *archive.Archive, profileID st
 					return nil
 				}
 				rel = parts[0]
+				sourcePath = rel
 				size, _ = strconv.ParseInt(parts[1], 10, 64)
-				archivePath = strings.TrimSuffix(path, ".metadata")
+				archivePath = ""
 			} else {
 				info, err := entry.Info()
 				if err != nil {
@@ -354,6 +356,7 @@ func ImportMediaMetadata(ctx context.Context, arc *archive.Archive, profileID st
 				ProfileID:   profileID,
 				MediaID:     mediaID,
 				Kind:        kind,
+				SourcePath:  sourcePath,
 				ArchivePath: archivePath,
 				ByteSize:    size,
 				RawJSON:     string(rawJSON),
