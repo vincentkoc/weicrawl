@@ -84,6 +84,42 @@ func TestDecryptSnapshotWithSQLCipherFixture(t *testing.T) {
 	}
 }
 
+func TestCheckSnapshotKeysDoesNotDecrypt(t *testing.T) {
+	root := t.TempDir()
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	snapshotDB := filepath.Join(root, "snapshot", "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(snapshotDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapshotDB, []byte("encrypted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"message/message_0.db":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sqlcipher := filepath.Join(root, "sqlcipher")
+	if err := os.WriteFile(sqlcipher, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(root, "decrypted")
+	check, err := CheckSnapshotKeys(DecryptOptions{
+		SnapshotDir:   filepath.Join(root, "snapshot"),
+		OutputDir:     outDir,
+		KeysPath:      keysPath,
+		SQLCipherPath: sqlcipher,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !check.Ready || check.KeyCount != 1 || len(check.Found) != 1 || len(check.Missing) != 0 {
+		t.Fatalf("check = %#v", check)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created output dir: %v", err)
+	}
+}
+
 func createPlainNativeDB(t *testing.T, path string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", path)

@@ -613,6 +613,28 @@ func (e env) runUnlock(args []string) error {
 		if strings.TrimSpace(*snapshotPath) == "" || strings.TrimSpace(*outDir) == "" {
 			return output.UsageError{Err: errors.New("unlock desktop with --keys requires --snapshot and --out")}
 		}
+		if *explain {
+			check, err := unlock.CheckSnapshotKeys(unlock.DecryptOptions{
+				SnapshotDir:   config.Expand(*snapshotPath),
+				OutputDir:     config.Expand(*outDir),
+				KeysPath:      config.Expand(*keysPath),
+				SQLCipherPath: config.Expand(*sqlcipherPath),
+			})
+			if err != nil {
+				return err
+			}
+			return e.write("unlock", map[string]any{
+				"subcommand":  sub,
+				"method":      "key-manifest+sqlcipher",
+				"app_version": disc.AppVersion,
+				"profile":     *profile,
+				"persisted":   false,
+				"dry_run":     true,
+				"available":   check.Ready,
+				"check":       check,
+				"next":        "rerun without --explain to decrypt the copied snapshot",
+			})
+		}
 		result, err := unlock.DecryptSnapshot(e.ctx, unlock.DecryptOptions{
 			SnapshotDir:   config.Expand(*snapshotPath),
 			OutputDir:     config.Expand(*outDir),

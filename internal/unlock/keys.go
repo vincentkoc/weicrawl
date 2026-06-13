@@ -40,6 +40,16 @@ type DecryptEntry struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
+type KeyReadiness struct {
+	SnapshotDir string         `json:"snapshot_dir"`
+	KeysPath    string         `json:"keys_path"`
+	SQLCipher   string         `json:"sqlcipher,omitempty"`
+	KeyCount    int            `json:"key_count"`
+	Found       []DecryptEntry `json:"found,omitempty"`
+	Missing     []DecryptEntry `json:"missing,omitempty"`
+	Ready       bool           `json:"ready"`
+}
+
 type KeyScanPlan struct {
 	Allowed bool     `json:"allowed"`
 	Execute bool     `json:"execute"`
@@ -156,6 +166,40 @@ func DecryptSnapshot(ctx context.Context, opts DecryptOptions) (DecryptResult, e
 	if len(result.Decrypted) == 0 {
 		return result, errors.New("no databases were decrypted")
 	}
+	return result, nil
+}
+
+func CheckSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
+	if strings.TrimSpace(opts.SnapshotDir) == "" {
+		return KeyReadiness{}, errors.New("snapshot dir is required")
+	}
+	keys, err := ReadKeyManifest(opts.KeysPath)
+	if err != nil {
+		return KeyReadiness{}, err
+	}
+	sqlcipher, err := FindSQLCipher(opts.SQLCipherPath)
+	if err != nil {
+		return KeyReadiness{}, err
+	}
+	result := KeyReadiness{SnapshotDir: opts.SnapshotDir, KeysPath: opts.KeysPath, SQLCipher: sqlcipher, KeyCount: len(keys.Keys)}
+	dbRoot := filepath.Join(opts.SnapshotDir, "db_storage")
+	if _, err := os.Stat(dbRoot); err != nil {
+		return result, fmt.Errorf("stat snapshot db_storage: %w", err)
+	}
+	relPaths := make([]string, 0, len(keys.Keys))
+	for rel := range keys.Keys {
+		relPaths = append(relPaths, rel)
+	}
+	sort.Strings(relPaths)
+	for _, rel := range relPaths {
+		src := filepath.Join(dbRoot, rel)
+		if info, err := os.Stat(src); err != nil || info.IsDir() {
+			result.Missing = append(result.Missing, DecryptEntry{Database: rel, Reason: "source not found"})
+			continue
+		}
+		result.Found = append(result.Found, DecryptEntry{Database: rel})
+	}
+	result.Ready = len(result.Found) > 0 && len(result.Missing) == 0
 	return result, nil
 }
 
