@@ -814,15 +814,16 @@ func (e env) runUnlock(args []string) error {
 			return err
 		}
 		scanPayload := map[string]any{
-			"subcommand":   sub,
-			"method":       "external-key-scanner",
-			"app_version":  disc.AppVersion,
-			"profile":      *profile,
-			"persisted":    false,
-			"available":    plan.Allowed,
-			"version_gate": unlockVersionGate(disc.AppVersion),
-			"next":         "review the scanner command, then rerun with --execute to write a key manifest",
-			"plan":         plan,
+			"subcommand":     sub,
+			"method":         "external-key-scanner",
+			"app_version":    disc.AppVersion,
+			"profile":        *profile,
+			"persisted":      false,
+			"available":      plan.Allowed,
+			"wechat_running": disc.Running,
+			"version_gate":   unlockVersionGate(disc.AppVersion),
+			"next":           "review the scanner command, then rerun with --execute to write a key manifest",
+			"plan":           plan,
 		}
 		if !*execute {
 			return e.write("unlock", scanPayload)

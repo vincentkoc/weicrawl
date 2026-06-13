@@ -219,6 +219,9 @@ func TestBuildKeyScanPlanUsesPythonOnlyForPythonScripts(t *testing.T) {
 	if len(plan.Command) != 2 || plan.Command[0] != "python3" || plan.Command[1] != "/tmp/find_key_memscan.py" {
 		t.Fatalf("python command = %#v", plan.Command)
 	}
+	if !strings.Contains(strings.Join(plan.Notes, "\n"), "per-database keys") {
+		t.Fatalf("plan notes = %#v", plan.Notes)
+	}
 	plan, err = BuildKeyScanPlan(true, false, "/tmp/find_all_keys_macos", "keys.json")
 	if err != nil {
 		t.Fatal(err)

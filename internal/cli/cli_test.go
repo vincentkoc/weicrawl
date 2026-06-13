@@ -1473,9 +1473,15 @@ func TestCLIKeyScanRequiresExplicitProcessInspect(t *testing.T) {
 	if fmt.Sprint(plan["next"]) == "" || plan["version_gate"] == nil {
 		t.Fatalf("scan plan next/version gate missing: %#v", plan)
 	}
+	if _, ok := plan["wechat_running"].(bool); !ok {
+		t.Fatalf("scan plan should report WeChat running state: %#v", plan)
+	}
 	nestedPlan := plan["plan"].(map[string]any)
 	if nestedPlan["execute"].(bool) {
 		t.Fatalf("plan unexpectedly executes: %#v", plan)
+	}
+	if !strings.Contains(fmt.Sprint(nestedPlan["notes"]), "per-database keys") {
+		t.Fatalf("scan plan notes should mention per-database keys: %#v", nestedPlan)
 	}
 }
 
