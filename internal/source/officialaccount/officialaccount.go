@@ -33,6 +33,7 @@ type Result struct {
 	Status      string   `json:"status"`
 	TokenProbed bool     `json:"token_probed"`
 	ExpiresIn   int64    `json:"expires_in,omitempty"`
+	Accounts    int64    `json:"accounts,omitempty"`
 	Articles    int64    `json:"articles,omitempty"`
 	Warnings    []string `json:"warnings,omitempty"`
 }
@@ -114,6 +115,16 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 	if err := arc.UpsertProfile(ctx, "official-account", appID, "Official Account", baseURL, "", map[string]any{"source": "official-account-api", "app_id_configured": true}); err != nil {
 		return result, err
 	}
+	rawAccount, _ := json.Marshal(map[string]any{"source": "official-account-api", "app_id_configured": true})
+	if err := arc.UpsertBizAccount(ctx, archive.BizAccount{
+		ProfileID:   "official-account",
+		AccountID:   appID,
+		DisplayName: appID,
+		RawJSON:     string(rawAccount),
+	}); err != nil {
+		return result, err
+	}
+	result.Accounts = 1
 	materials, err := fetchNewsMaterials(ctx, baseURL, token.AccessToken, 0, 20)
 	if err != nil {
 		err = redactOfficialError(err)

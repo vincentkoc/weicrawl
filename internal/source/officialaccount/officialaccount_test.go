@@ -63,7 +63,7 @@ func TestSyncFetchesNewsMaterialsWithoutPersistingToken(t *testing.T) {
 	if !sawMaterialToken {
 		t.Fatal("material request did not use fetched token")
 	}
-	if result.Articles != 1 || result.Status != "success" {
+	if result.Accounts != 1 || result.Articles != 1 || result.Status != "success" {
 		t.Fatalf("result = %#v", result)
 	}
 	status, err := arc.Status(context.Background())
@@ -72,6 +72,9 @@ func TestSyncFetchesNewsMaterialsWithoutPersistingToken(t *testing.T) {
 	}
 	if status.PublicAccountArticleCount != 1 {
 		t.Fatalf("article count = %d", status.PublicAccountArticleCount)
+	}
+	if status.BizAccountCount != 1 {
+		t.Fatalf("biz account count = %d", status.BizAccountCount)
 	}
 	rows, err := arc.Query(context.Background(), `select value from sync_state where source_name='official-account-api' and entity_id='access_token'`)
 	if err != nil {
