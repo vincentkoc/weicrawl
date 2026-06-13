@@ -402,6 +402,29 @@ func TestUnlockDesktopDoesNotClaimAvailability(t *testing.T) {
 	}
 }
 
+func TestUnlockForgetReportsNoPersistedMaterial(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	code, out, errOut := runForTest("--json", "unlock", "forget", "--profile", "alice")
+	if code != 0 {
+		t.Fatalf("unlock forget code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["forgotten"].(bool) {
+		t.Fatalf("forget claimed persisted deletion: %#v", payload)
+	}
+	if available := payload["available"].(bool); available {
+		t.Fatalf("forget unexpectedly available: %#v", payload)
+	}
+	if !strings.Contains(fmt.Sprint(payload["warning"]), "no persisted unlock material") {
+		t.Fatalf("forget warning missing: %#v", payload)
+	}
+}
+
 func TestHelpListsAllGlobalFlags(t *testing.T) {
 	code, out, errOut := runForTest("help")
 	if code != 0 {

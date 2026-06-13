@@ -632,7 +632,10 @@ func (e env) runUnlock(args []string) error {
 			"redacted":        redacted,
 		})
 	case "forget":
-		payload["forgotten"] = true
+		payload["forgotten"] = false
+		payload["available"] = false
+		payload["warning"] = "no persisted unlock material is managed by weicrawl yet"
+		payload["next"] = "nothing to forget; decrypted snapshots are caller-managed"
 	default:
 		return output.UsageError{Err: fmt.Errorf("unknown unlock subcommand %q", sub)}
 	}
