@@ -1407,11 +1407,14 @@ func manifest() control.Manifest {
 		"official-account-api",
 	}
 	for _, cmd := range []control.Command{
+		{Title: "Version", Argv: []string{"weicrawl", "--json", "version"}, JSON: true},
+		{Title: "Init", Argv: []string{"weicrawl", "--json", "init"}, JSON: true, Mutates: true},
 		{Title: "Doctor", Argv: []string{"weicrawl", "--json", "doctor"}, JSON: true},
+		{Title: "Metadata", Argv: []string{"weicrawl", "--json", "metadata"}, JSON: true},
 		{Title: "Status", Argv: []string{"weicrawl", "--json", "status"}, JSON: true},
 		{Title: "Sync", Argv: []string{"weicrawl", "--json", "sync", "--source", "all"}, JSON: true, Mutates: true},
+		{Title: "Unlock", Argv: []string{"weicrawl", "--json", "unlock", "status"}, JSON: true},
 		{Title: "Search", Argv: []string{"weicrawl", "--json", "search"}, JSON: true},
-		{Title: "TUI", Argv: []string{"weicrawl", "--json", "tui"}, JSON: true},
 		{Title: "Profiles", Argv: []string{"weicrawl", "--json", "profiles"}, JSON: true},
 		{Title: "Contacts", Argv: []string{"weicrawl", "--json", "contacts"}, JSON: true},
 		{Title: "Chats", Argv: []string{"weicrawl", "--json", "chats"}, JSON: true},
@@ -1420,11 +1423,18 @@ func manifest() control.Manifest {
 		{Title: "Articles", Argv: []string{"weicrawl", "--json", "articles"}, JSON: true},
 		{Title: "Media", Argv: []string{"weicrawl", "--json", "media"}, JSON: true},
 		{Title: "Runs", Argv: []string{"weicrawl", "--json", "runs"}, JSON: true},
-		{Title: "Metadata", Argv: []string{"weicrawl", "--json", "metadata"}, JSON: true},
+		{Title: "SQL", Argv: []string{"weicrawl", "--json", "sql"}, JSON: true},
+		{Title: "Export", Argv: []string{"weicrawl", "--json", "export"}, JSON: true},
+		{Title: "Snapshot", Argv: []string{"weicrawl", "--json", "snapshot"}, JSON: true, Mutates: true},
+		{Title: "Import", Argv: []string{"weicrawl", "--json", "import"}, JSON: true, Mutates: true},
+		{Title: "TUI", Argv: []string{"weicrawl", "--json", "tui"}, JSON: true},
+		{Title: "Completion", Argv: []string{"weicrawl", "completion"}, JSON: false},
 	} {
 		name := cmd.Argv[len(cmd.Argv)-1]
 		if name == "all" {
 			name = "sync"
+		} else if name == "status" && len(cmd.Argv) >= 3 && cmd.Argv[len(cmd.Argv)-2] == "unlock" {
+			name = "unlock"
 		}
 		m.Commands[name] = cmd
 	}

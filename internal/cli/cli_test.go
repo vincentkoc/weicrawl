@@ -417,7 +417,7 @@ func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := payload["commands"].(map[string]any)
-	for _, name := range []string{"sync", "profiles", "contacts", "messages", "favorites", "articles", "media", "runs"} {
+	for _, name := range []string{"version", "init", "doctor", "metadata", "status", "sync", "unlock", "profiles", "contacts", "chats", "messages", "favorites", "articles", "media", "runs", "sql", "export", "snapshot", "import", "tui", "completion"} {
 		if _, ok := commands[name]; !ok {
 			t.Fatalf("metadata command %q missing: %#v", name, commands)
 		}
@@ -426,6 +426,14 @@ func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 	argv := syncCommand["argv"].([]any)
 	if got := fmt.Sprint(argv[len(argv)-2]) + " " + fmt.Sprint(argv[len(argv)-1]); got != "--source all" {
 		t.Fatalf("sync argv = %#v", argv)
+	}
+	for _, name := range []string{"init", "sync", "snapshot", "import"} {
+		if !commands[name].(map[string]any)["mutates"].(bool) {
+			t.Fatalf("command %q should be marked mutating: %#v", name, commands[name])
+		}
+	}
+	if commands["completion"].(map[string]any)["json"] != nil {
+		t.Fatalf("completion should not advertise JSON output: %#v", commands["completion"])
 	}
 	capabilities := map[string]bool{}
 	for _, value := range payload["capabilities"].([]any) {
