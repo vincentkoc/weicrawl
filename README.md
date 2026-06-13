@@ -97,6 +97,11 @@ go run ./cmd/weicrawl --json sync \
   --keep-source-snapshot
 
 go run ./cmd/weicrawl --json unlock desktop \
+  --explain \
+  --keys ./wechat_keys.json \
+  --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile>
+
+go run ./cmd/weicrawl --json unlock desktop \
   --keys ./wechat_keys.json \
   --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile> \
   --out ./decrypted

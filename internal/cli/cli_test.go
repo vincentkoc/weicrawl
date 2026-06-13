@@ -465,7 +465,7 @@ func TestUnlockDesktopExplainWithKeysIsDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	outDir := filepath.Join(root, "decrypted")
-	code, out, errOut := runForTest("--json", "unlock", "desktop", "--explain", "--keys", keysPath, "--snapshot", snapshotRoot, "--out", outDir, "--sqlcipher", sqlcipher)
+	code, out, errOut := runForTest("--json", "unlock", "desktop", "--explain", "--keys", keysPath, "--snapshot", snapshotRoot, "--sqlcipher", sqlcipher)
 	if code != 0 {
 		t.Fatalf("unlock explain code=%d stderr=%s stdout=%s", code, errOut, out)
 	}

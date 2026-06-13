@@ -610,10 +610,10 @@ func (e env) runUnlock(args []string) error {
 			payload["warning"] = "process inspection is deliberately not implemented; pass --keys with a reviewed key manifest to decrypt a copied snapshot"
 			break
 		}
-		if strings.TrimSpace(*snapshotPath) == "" || strings.TrimSpace(*outDir) == "" {
-			return output.UsageError{Err: errors.New("unlock desktop with --keys requires --snapshot and --out")}
-		}
 		if *explain {
+			if strings.TrimSpace(*snapshotPath) == "" {
+				return output.UsageError{Err: errors.New("unlock desktop --explain with --keys requires --snapshot")}
+			}
 			check, err := unlock.CheckSnapshotKeys(unlock.DecryptOptions{
 				SnapshotDir:   config.Expand(*snapshotPath),
 				OutputDir:     config.Expand(*outDir),
@@ -634,6 +634,9 @@ func (e env) runUnlock(args []string) error {
 				"check":       check,
 				"next":        "rerun without --explain to decrypt the copied snapshot",
 			})
+		}
+		if strings.TrimSpace(*snapshotPath) == "" || strings.TrimSpace(*outDir) == "" {
+			return output.UsageError{Err: errors.New("unlock desktop with --keys requires --snapshot and --out")}
 		}
 		result, err := unlock.DecryptSnapshot(e.ctx, unlock.DecryptOptions{
 			SnapshotDir:   config.Expand(*snapshotPath),

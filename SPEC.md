@@ -560,11 +560,20 @@ Subcommands:
 
 Flags:
 
+- `--keys <wechat_keys.json>`
+- `--snapshot <copied-profile-root>`
+- `--out <decrypted-dir>`
+- `--sqlcipher <path>`
 - `--allow-process-inspect`
 - `--allow-keychain`
 - `--store-keychain`
 - `--once`
 - `--explain`
+
+`unlock desktop --explain --keys <manifest> --snapshot <copied-profile-root>`
+is a dry-run readiness check. It verifies the manifest shape, matching snapshot
+DB paths, and `sqlcipher` availability without writing decrypted files. Running
+without `--explain` requires `--out` and performs the decrypt.
 
 Output must include:
 
