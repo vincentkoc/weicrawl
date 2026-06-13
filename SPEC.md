@@ -571,11 +571,17 @@ Flags:
 - `--store-keychain`
 - `--once`
 - `--explain`
+- `--sync`
 
 `unlock desktop --explain --keys <manifest> --snapshot <copied-profile-root>`
 is a dry-run readiness check. It verifies the manifest shape, matching snapshot
 DB paths, and `sqlcipher` availability without writing decrypted files. Running
 without `--explain` requires `--out` and performs the decrypt.
+
+`unlock desktop --sync` should ingest the decrypted output into the configured
+archive immediately after decrypting the copied snapshot. It must still require
+explicit key material and a copied snapshot path; it must not read or mutate
+live WeChat databases.
 
 Key manifests must support both explicit per-database keys and one profile
 default key:

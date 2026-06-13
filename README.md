@@ -106,13 +106,18 @@ go run ./cmd/weicrawl --json unlock desktop \
 go run ./cmd/weicrawl --json unlock desktop \
   --keys ./wechat_keys.json \
   --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile> \
-  --out ./decrypted
+  --out ./decrypted \
+  --sync
 
 go run ./cmd/weicrawl --json sync \
   --source desktop-macos \
   --profile <profile> \
   --decrypted-dir ./decrypted
 ```
+
+`--sync` ingests the decrypted output into the archive immediately. The separate
+`sync --decrypted-dir` command remains useful when decryption and import are
+run as separate review steps.
 
 `wechat_keys.json` may either map individual copied database paths to keys or
 provide one profile key:

@@ -614,6 +614,7 @@ func (e env) runUnlock(args []string) error {
 	storeKeychain := fs.Bool("store-keychain", false, "persist unlock material in keychain")
 	once := fs.Bool("once", false, "memory only")
 	explain := fs.Bool("explain", false, "explain planned method")
+	syncAfterUnlock := fs.Bool("sync", false, "ingest decrypted output after unlock")
 	script := fs.String("script", "", "key scanner script path")
 	outputPath := fs.String("scan-out", "wechat_keys.json", "expected key manifest path")
 	execute := fs.Bool("execute", false, "run the key scanner instead of printing the plan")
@@ -683,7 +684,7 @@ func (e env) runUnlock(args []string) error {
 		if nextProfile == "" {
 			nextProfile = "decrypted"
 		}
-		return e.write("unlock", map[string]any{
+		payload := map[string]any{
 			"subcommand":  sub,
 			"method":      "key-manifest+sqlcipher",
 			"app_version": disc.AppVersion,
@@ -691,7 +692,21 @@ func (e env) runUnlock(args []string) error {
 			"persisted":   false,
 			"decrypt":     result,
 			"next":        fmt.Sprintf("run `weicrawl sync --source desktop-macos --profile %s --decrypted-dir %s`", nextProfile, result.OutputDir),
-		})
+		}
+		if *syncAfterUnlock {
+			arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+			if err != nil {
+				return err
+			}
+			defer arc.Close()
+			syncResult, err := desktopmac.SyncDecryptedDirectory(e.ctx, arc, nextProfile, result.OutputDir, disc.AppVersion, "", true)
+			if err != nil {
+				return err
+			}
+			payload["sync"] = syncResult
+			payload["next"] = "run `weicrawl status --json` or `weicrawl search --json <query>`"
+		}
+		return e.write("unlock", payload)
 	case "scan-keys":
 		plan, err := unlock.BuildKeyScanPlan(*allowProcess, *execute, config.Expand(*script), config.Expand(*outputPath))
 		if err != nil {
@@ -1643,6 +1658,7 @@ func manifest() control.Manifest {
 		"desktop-snapshot",
 		"desktop-backup",
 		"decrypted-db-import",
+		"unlock-sync",
 		"fts-search",
 		"jsonl-import",
 		"jsonl-export",

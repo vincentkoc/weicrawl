@@ -681,7 +681,7 @@ func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 	for _, value := range payload["capabilities"].([]any) {
 		capabilities[fmt.Sprint(value)] = true
 	}
-	for _, name := range []string{"desktop-backup", "jsonl-import", "official-account-api"} {
+	for _, name := range []string{"desktop-backup", "jsonl-import", "official-account-api", "unlock-sync"} {
 		if !capabilities[name] {
 			t.Fatalf("capability %q missing: %#v", name, capabilities)
 		}
@@ -1183,6 +1183,63 @@ func TestCLIUnlockDecryptThenSyncEncryptedFixture(t *testing.T) {
 	}
 	if got := int(payload["imported_media"].(float64)); got != 1 {
 		t.Fatalf("imported_media = %d, payload=%#v", got, payload)
+	}
+}
+
+func TestCLIUnlockDesktopSyncImportsEncryptedFixture(t *testing.T) {
+	sqlcipher, err := exec.LookPath("sqlcipher")
+	if err != nil {
+		sqlcipher = "/opt/homebrew/opt/sqlcipher/bin/sqlcipher"
+		if _, statErr := os.Stat(sqlcipher); statErr != nil {
+			t.Skip("sqlcipher unavailable")
+		}
+	}
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	plain := filepath.Join(root, "plain.db")
+	createNativeMessageDB(t, plain, "alice")
+	snapshotRoot := filepath.Join(root, "snapshot")
+	encrypted := filepath.Join(snapshotRoot, "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(encrypted), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	encryptSQLiteFixture(t, sqlcipher, plain, encrypted, key)
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runForTest("--json", "init")
+	if code != 0 {
+		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	decryptedDir := filepath.Join(root, "decrypted")
+	code, out, errOut = runForTest("--json", "unlock", "desktop", "--sync", "--profile", "profile-decrypted", "--keys", keysPath, "--snapshot", snapshotRoot, "--out", decryptedDir)
+	if code != 0 {
+		t.Fatalf("unlock sync code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["method"] != "key-manifest+sqlcipher" || payload["sync"] == nil {
+		t.Fatalf("unlock sync payload = %#v", payload)
+	}
+	syncPayload := payload["sync"].(map[string]any)
+	if got := int(syncPayload["imported_messages"].(float64)); got != 3 {
+		t.Fatalf("imported_messages = %d, payload=%#v", got, syncPayload)
+	}
+	code, out, errOut = runForTest("--json", "search", "decrypted shape")
+	if code != 0 {
+		t.Fatalf("search code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var search map[string]any
+	if err := json.Unmarshal(out.Bytes(), &search); err != nil {
+		t.Fatal(err)
+	}
+	if hits := search["hits"].([]any); len(hits) == 0 {
+		t.Fatalf("search hits = %#v", hits)
 	}
 }
 
