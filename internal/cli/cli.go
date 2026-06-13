@@ -615,6 +615,7 @@ func (e env) runUnlock(args []string) error {
 	once := fs.Bool("once", false, "memory only")
 	explain := fs.Bool("explain", false, "explain planned method")
 	syncAfterUnlock := fs.Bool("sync", false, "ingest decrypted output after unlock")
+	keepDecrypted := fs.Bool("keep-decrypted-snapshot", e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots, "keep decrypted output after --sync")
 	script := fs.String("script", "", "key scanner script path")
 	outputPath := fs.String("scan-out", "wechat_keys.json", "expected key manifest path")
 	execute := fs.Bool("execute", false, "run the key scanner instead of printing the plan")
@@ -699,11 +700,17 @@ func (e env) runUnlock(args []string) error {
 				return err
 			}
 			defer arc.Close()
-			syncResult, err := desktopmac.SyncDecryptedDirectory(e.ctx, arc, nextProfile, result.OutputDir, disc.AppVersion, "", true)
+			syncResult, err := desktopmac.SyncDecryptedDirectory(e.ctx, arc, nextProfile, result.OutputDir, disc.AppVersion, "", *keepDecrypted)
 			if err != nil {
 				return err
 			}
 			payload["sync"] = syncResult
+			if !*keepDecrypted {
+				if err := os.RemoveAll(result.OutputDir); err != nil {
+					return fmt.Errorf("remove decrypted output: %w", err)
+				}
+				payload["decrypted_removed"] = true
+			}
 			payload["next"] = "run `weicrawl status --json` or `weicrawl search --json <query>`"
 		}
 		return e.write("unlock", payload)

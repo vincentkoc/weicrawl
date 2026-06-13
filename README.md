@@ -117,7 +117,8 @@ go run ./cmd/weicrawl --json sync \
 
 `--sync` ingests the decrypted output into the archive immediately. The separate
 `sync --decrypted-dir` command remains useful when decryption and import are
-run as separate review steps.
+run as separate review steps. With `--sync`, decrypted output is removed after
+import unless `--keep-decrypted-snapshot` is supplied.
 
 `unlock scan-keys --script` accepts either a Python script or an executable
 helper. Python scripts are run with `python3`; other paths are executed
