@@ -24,6 +24,7 @@ type SnapshotOptions struct {
 	IncludeMedia bool
 	MediaMode    string
 	Keep         bool
+	Since        string
 }
 
 type Snapshot struct {
@@ -50,6 +51,7 @@ type SyncResult struct {
 	ProfileID          string   `json:"profile_id,omitempty"`
 	Source             string   `json:"source"`
 	Status             string   `json:"status"`
+	Since              string   `json:"since,omitempty"`
 	SnapshotPath       string   `json:"snapshot_path,omitempty"`
 	SourceDBCount      int      `json:"source_db_count"`
 	ImportedProfiles   int64    `json:"imported_profiles"`
@@ -139,7 +141,7 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts SnapshotOptions) (SyncResult, error) {
 	started := time.Now().UTC()
 	snap, err := CreateSnapshot(ctx, opts)
-	result := SyncResult{Source: "desktop-macos"}
+	result := SyncResult{Source: "desktop-macos", Since: opts.Since}
 	if snap.RunID != "" {
 		result.RunID = snap.RunID
 		result.ProfileID = snap.ProfileID
@@ -162,7 +164,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 	for _, file := range snap.DatabaseFiles {
 		files = append(files, importer.File{Path: file.Path, Role: file.Role})
 	}
-	importResult, warnings, err := importer.ImportFixtureDatabases(ctx, arc, snap.ProfileID, files)
+	importResult, warnings, err := importer.ImportFixtureDatabasesWithOptions(ctx, arc, snap.ProfileID, files, importer.Options{Since: opts.Since})
 	result.ImportedContacts = importResult.Contacts
 	result.ImportedChats = importResult.Chats
 	result.ImportedMessages = importResult.Messages
@@ -220,7 +222,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 	return result, err
 }
 
-func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID, decryptedDir, appVersion string) (SyncResult, error) {
+func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID, decryptedDir, appVersion, since string) (SyncResult, error) {
 	started := time.Now().UTC()
 	runID := "decrypted-" + started.Format("20060102T150405.000000000Z")
 	if strings.TrimSpace(profileID) == "" {
@@ -234,6 +236,7 @@ func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID
 		RunID:         runID,
 		ProfileID:     profileID,
 		Source:        "desktop-macos-decrypted",
+		Since:         since,
 		SnapshotPath:  decryptedDir,
 		SourceDBCount: len(files),
 	}
@@ -241,7 +244,7 @@ func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID
 		return result, err
 	}
 	result.ImportedProfiles = 1
-	importResult, warnings, err := importer.ImportFixtureDatabases(ctx, arc, profileID, files)
+	importResult, warnings, err := importer.ImportFixtureDatabasesWithOptions(ctx, arc, profileID, files, importer.Options{Since: since})
 	result.ImportedContacts = importResult.Contacts
 	result.ImportedChats = importResult.Chats
 	result.ImportedMessages = importResult.Messages

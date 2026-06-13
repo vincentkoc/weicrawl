@@ -17,12 +17,14 @@ import (
 type Options struct {
 	Root      string
 	ProfileID string
+	Since     string
 }
 
 type Result struct {
 	RunID              string   `json:"run_id"`
 	ProfileID          string   `json:"profile_id"`
 	Source             string   `json:"source"`
+	Since              string   `json:"since,omitempty"`
 	BackupRoot         string   `json:"backup_root"`
 	SourceDBCount      int      `json:"source_db_count"`
 	ImportedProfiles   int64    `json:"imported_profiles"`
@@ -58,6 +60,7 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 		RunID:         runID,
 		ProfileID:     profileID,
 		Source:        "desktop-backup",
+		Since:         opts.Since,
 		BackupRoot:    root,
 		SourceDBCount: len(files),
 	}
@@ -65,7 +68,7 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 		return result, err
 	}
 	result.ImportedProfiles = 1
-	importResult, warnings, err := importer.ImportFixtureDatabases(ctx, arc, profileID, files)
+	importResult, warnings, err := importer.ImportFixtureDatabasesWithOptions(ctx, arc, profileID, files, importer.Options{Since: opts.Since})
 	result.ImportedContacts = importResult.Contacts
 	result.ImportedChats = importResult.Chats
 	result.ImportedMessages = importResult.Messages

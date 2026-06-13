@@ -57,6 +57,7 @@ type syncOptions struct {
 	BackupRoot   string
 	ImportPath   string
 	ImportFormat string
+	Since        string
 }
 
 type syncAllResult struct {
@@ -342,11 +343,21 @@ func (e env) runSync(args []string) error {
 	backupRoot := fs.String("backup-root", "", "user-selected WeChat backup root")
 	importPath := fs.String("import-path", "", "artifact path for source=import")
 	importFormat := fs.String("format", "jsonl", "import artifact format")
-	_ = fs.Bool("full", false, "full sync")
-	_ = fs.String("since", "", "lower bound timestamp")
-	_ = fs.Int("concurrency", 1, "copy concurrency")
+	full := fs.Bool("full", false, "full sync")
+	since := fs.String("since", "", "lower bound timestamp")
+	concurrency := fs.Int("concurrency", 1, "copy concurrency")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	sinceValue, err := parseSince(*since)
+	if err != nil {
+		return output.UsageError{Err: err}
+	}
+	if *full && sinceValue != "" {
+		return output.UsageError{Err: errors.New("use either --full or --since, not both")}
+	}
+	if *concurrency < 1 {
+		return output.UsageError{Err: errors.New("--concurrency must be at least 1")}
 	}
 	if *keepDecrypted {
 		return errors.New("--keep-decrypted-snapshot is reserved for the future explicit unlock flow")
@@ -360,6 +371,9 @@ func (e env) runSync(args []string) error {
 	if *source == "all" && strings.TrimSpace(*importPath) != "" && *importFormat != "jsonl" {
 		return output.UsageError{Err: fmt.Errorf("unsupported import format %q", *importFormat)}
 	}
+	if sinceValue != "" && (*source == "official-account-api" || *source == "import" || (*source == "all" && (e.loaded.Config.OfficialAccount.Enabled || strings.TrimSpace(*importPath) != ""))) {
+		return output.UsageError{Err: fmt.Errorf("--since is not supported with source %q yet", *source)}
+	}
 	opts := syncOptions{
 		Source:       *source,
 		Profile:      *profileFlag,
@@ -370,6 +384,7 @@ func (e env) runSync(args []string) error {
 		BackupRoot:   *backupRoot,
 		ImportPath:   *importPath,
 		ImportFormat: *importFormat,
+		Since:        sinceValue,
 	}
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
@@ -516,7 +531,7 @@ func (e env) syncOfficial(arc *archive.Archive) (officialaccount.Result, error) 
 }
 
 func (e env) syncBackup(arc *archive.Archive, opts syncOptions) (backup.Result, error) {
-	return backup.Sync(e.ctx, arc, backup.Options{Root: config.Expand(opts.BackupRoot), ProfileID: opts.Profile})
+	return backup.Sync(e.ctx, arc, backup.Options{Root: config.Expand(opts.BackupRoot), ProfileID: opts.Profile, Since: opts.Since})
 }
 
 func (e env) syncDesktop(arc *archive.Archive, opts syncOptions) (desktopmac.SyncResult, error) {
@@ -525,7 +540,7 @@ func (e env) syncDesktop(arc *archive.Archive, opts syncOptions) (desktopmac.Syn
 		if profileID == "" {
 			profileID = "decrypted"
 		}
-		return desktopmac.SyncDecryptedDirectory(e.ctx, arc, profileID, config.Expand(opts.DecryptedDir), "")
+		return desktopmac.SyncDecryptedDirectory(e.ctx, arc, profileID, config.Expand(opts.DecryptedDir), "", opts.Since)
 	}
 	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
 	profile, ok := desktopmac.SelectProfile(disc, opts.Profile)
@@ -539,6 +554,7 @@ func (e env) syncDesktop(arc *archive.Archive, opts syncOptions) (desktopmac.Syn
 		IncludeMedia: opts.IncludeMedia,
 		MediaMode:    opts.MediaMode,
 		Keep:         opts.KeepSource,
+		Since:        opts.Since,
 	})
 }
 

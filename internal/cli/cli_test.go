@@ -542,6 +542,34 @@ func TestCLISyncDesktopBackup(t *testing.T) {
 	if len(values) != 1 || values[0].(map[string]any)["source"] != "desktop-backup" {
 		t.Fatalf("runs = %#v", runs)
 	}
+
+	sinceDB := filepath.Join(root, "since.db")
+	code, out, errOut = runForTest("--json", "--db", sinceDB, "init")
+	if code != 0 {
+		t.Fatalf("since init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	code, out, errOut = runForTest("--json", "--db", sinceDB, "sync", "--source", "desktop-backup", "--backup-root", backupRoot, "--since", "2026-06-13T01:30:00Z")
+	if code != 0 {
+		t.Fatalf("backup since sync code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["since"] != "2026-06-13T01:30:00Z" {
+		t.Fatalf("since payload = %#v", payload)
+	}
+	if got := int(payload["imported_messages"].(float64)); got != 1 {
+		t.Fatalf("since imported_messages = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_message_parts"].(float64)); got != 1 {
+		t.Fatalf("since imported_message_parts = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_message_events"].(float64)); got != 1 {
+		t.Fatalf("since imported_message_events = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_favorites"].(float64)); got != 1 {
+		t.Fatalf("since imported_favorites = %d, payload=%#v", got, payload)
+	}
 }
 
 func TestCLISyncAllAggregatesConfiguredAndExplicitSources(t *testing.T) {

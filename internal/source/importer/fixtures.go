@@ -28,12 +28,20 @@ type Result struct {
 	RawRecords    int64 `json:"raw_records"`
 }
 
+type Options struct {
+	Since string
+}
+
 type File struct {
 	Path string
 	Role string
 }
 
 func ImportFixtureDatabases(ctx context.Context, arc *archive.Archive, profileID string, files []File) (Result, []string, error) {
+	return ImportFixtureDatabasesWithOptions(ctx, arc, profileID, files, Options{})
+}
+
+func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive, profileID string, files []File, opts Options) (Result, []string, error) {
 	var result Result
 	var warnings []string
 	for _, file := range files {
@@ -42,7 +50,7 @@ func ImportFixtureDatabases(ctx context.Context, arc *archive.Archive, profileID
 			warnings = append(warnings, fmt.Sprintf("%s: open readonly failed; likely encrypted or not sqlite", file.Role))
 			continue
 		}
-		counts, err := importReadableDB(ctx, arc, src.DB(), profileID, file)
+		counts, err := importReadableDB(ctx, arc, src.DB(), profileID, file, opts)
 		_ = src.Close()
 		result.Contacts += counts.Contacts
 		result.Chats += counts.Chats
@@ -60,14 +68,14 @@ func ImportFixtureDatabases(ctx context.Context, arc *archive.Archive, profileID
 	return result, warnings, nil
 }
 
-func importReadableDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File) (Result, error) {
+func importReadableDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, opts Options) (Result, error) {
 	var total Result
-	fixture, err := importFixtureDB(ctx, arc, db, profileID, file)
+	fixture, err := importFixtureDB(ctx, arc, db, profileID, file, opts)
 	if err != nil {
 		return total, err
 	}
 	total.add(fixture)
-	native, err := importNativeDB(ctx, arc, db, profileID, file)
+	native, err := importNativeDB(ctx, arc, db, profileID, file, opts)
 	if err != nil {
 		return total, err
 	}
@@ -75,12 +83,13 @@ func importReadableDB(ctx context.Context, arc *archive.Archive, db *sql.DB, pro
 	return total, nil
 }
 
-func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File) (Result, error) {
+func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, opts Options) (Result, error) {
 	var result Result
 	tables, err := tableSet(ctx, db)
 	if err != nil {
 		return result, err
 	}
+	importedMessages := map[string]bool{}
 	if tables["weicrawl_fixture_contacts"] {
 		rows, err := db.QueryContext(ctx, `select contact_id, coalesce(alias,''), coalesce(display_name,''), coalesce(remark_name,''), coalesce(kind,'user'), coalesce(avatar_ref,''), coalesce(raw_json,'{}') from weicrawl_fixture_contacts`)
 		if err != nil {
@@ -149,9 +158,13 @@ func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, prof
 			if strings.TrimSpace(msg.ChatID) == "" {
 				msg.ChatID = "unknown"
 			}
+			if !includeSince(msg.SentAt, opts.Since) {
+				continue
+			}
 			if err := arc.UpsertMessage(ctx, msg); err != nil {
 				return result, err
 			}
+			importedMessages[msg.MessageID] = true
 			result.Messages++
 		}
 	}
@@ -165,6 +178,9 @@ func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, prof
 			part := archive.MessagePart{ProfileID: profileID}
 			if err := rows.Scan(&part.MessageID, &part.PartIndex, &part.Kind, &part.Text, &part.MediaID, &part.URL, &part.RawJSON); err != nil {
 				return result, err
+			}
+			if opts.Since != "" && tables["weicrawl_fixture_messages"] && !importedMessages[part.MessageID] {
+				continue
 			}
 			if err := arc.UpsertMessagePart(ctx, part); err != nil {
 				return result, err
@@ -183,6 +199,9 @@ func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, prof
 			if err := rows.Scan(&event.ChatID, &event.MessageID, &event.EventType, &event.EventAt, &event.PayloadJSON); err != nil {
 				return result, err
 			}
+			if !includeSince(event.EventAt, opts.Since) {
+				continue
+			}
 			if err := arc.InsertMessageEvent(ctx, event); err != nil {
 				return result, err
 			}
@@ -199,6 +218,9 @@ func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, prof
 			favorite := archive.Favorite{ProfileID: profileID}
 			if err := rows.Scan(&favorite.FavoriteID, &favorite.Kind, &favorite.Title, &favorite.Text, &favorite.SourceRef, &favorite.RawJSON); err != nil {
 				return result, err
+			}
+			if opts.Since != "" && tables["weicrawl_fixture_messages"] && favorite.SourceRef != "" && !importedMessages[favorite.SourceRef] {
+				continue
 			}
 			if err := arc.UpsertFavorite(ctx, favorite); err != nil {
 				return result, err
@@ -217,6 +239,9 @@ func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, prof
 			if err := rows.Scan(&moment.MomentID, &moment.AuthorID, &moment.Text, &moment.CreatedAt, &moment.RawJSON); err != nil {
 				return result, err
 			}
+			if !includeSince(moment.CreatedAt, opts.Since) {
+				continue
+			}
 			if err := arc.UpsertMoment(ctx, moment); err != nil {
 				return result, err
 			}
@@ -226,7 +251,7 @@ func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, prof
 	return result, nil
 }
 
-func importNativeDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File) (Result, error) {
+func importNativeDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, opts Options) (Result, error) {
 	var result Result
 	tables, err := tableSet(ctx, db)
 	if err != nil {
@@ -258,7 +283,7 @@ func importNativeDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profi
 		result.Chats += n
 	}
 	if tables["Name2Id"] && hasColumns(columns["Name2Id"], "user_name") {
-		counts, err := importMessageTables(ctx, arc, db, profileID, file, tables)
+		counts, err := importMessageTables(ctx, arc, db, profileID, file, tables, opts)
 		if err != nil {
 			return result, err
 		}
@@ -332,7 +357,7 @@ func importSessionTable(ctx context.Context, arc *archive.Archive, db *sql.DB, p
 	return n, rows.Err()
 }
 
-func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, tables map[string]bool) (Result, error) {
+func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, tables map[string]bool, opts Options) (Result, error) {
 	var result Result
 	rows, err := db.QueryContext(ctx, `select user_name from Name2Id where coalesce(user_name,'') <> ''`)
 	if err != nil {
@@ -376,6 +401,9 @@ func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, 
 			if err := msgRows.Scan(&localID, &localType, &createdAt, &realSender, &content, &sourceValue); err != nil {
 				_ = msgRows.Close()
 				return result, err
+			}
+			if !includeSince(unixSeconds(createdAt), opts.Since) {
+				continue
 			}
 			sender := realSender
 			text := content
@@ -599,6 +627,19 @@ func unixSeconds(value int64) string {
 		return ""
 	}
 	return time.Unix(value, 0).UTC().Format(time.RFC3339)
+}
+
+func includeSince(value, since string) bool {
+	since = strings.TrimSpace(since)
+	if since == "" || strings.TrimSpace(value) == "" {
+		return true
+	}
+	valueTime, valueErr := time.Parse(time.RFC3339, value)
+	sinceTime, sinceErr := time.Parse(time.RFC3339, since)
+	if valueErr == nil && sinceErr == nil {
+		return !valueTime.Before(sinceTime)
+	}
+	return value >= since
 }
 
 func firstNonEmpty(values ...string) string {
