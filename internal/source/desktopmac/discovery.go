@@ -31,8 +31,10 @@ type Discovery struct {
 	ContainerPresent bool      `json:"container_present"`
 	ProfileRoots     []Profile `json:"profile_roots,omitempty"`
 	BackupDirs       []string  `json:"backup_dirs,omitempty"`
+	KeyInfoDatabases []DBFile  `json:"key_info_databases,omitempty"`
 	DatabaseCount    int       `json:"database_count"`
 	EncryptedDBCount int       `json:"encrypted_db_count"`
+	KeyInfoDBCount   int       `json:"key_info_db_count"`
 	MediaDirCount    int       `json:"media_dir_count"`
 	Warnings         []string  `json:"warnings,omitempty"`
 }
@@ -93,6 +95,8 @@ func Discover(ctx context.Context, containerPath string) Discovery {
 	root := filepath.Join(containerPath, XWeChatRelativeRoot)
 	out.XWeChatRoot = root
 	out.BackupDirs = findBackupDirs(root)
+	out.KeyInfoDatabases = findKeyInfoDatabases(root)
+	out.KeyInfoDBCount = len(out.KeyInfoDatabases)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("read xwechat_files: %v", err))
@@ -245,6 +249,34 @@ func findMediaDirs(profileRoot string) []string {
 			out = append(out, candidate)
 		}
 	}
+	return out
+}
+
+func findKeyInfoDatabases(xwechatRoot string) []DBFile {
+	loginRoot := filepath.Join(xwechatRoot, "all_users", "login")
+	var out []DBFile
+	_ = filepath.WalkDir(loginRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() || entry.Name() != "key_info.db" {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		sqliteHeader := hasSQLiteHeader(path)
+		db := DBFile{Path: path, Role: "key_info", Size: info.Size(), SQLite: sqliteHeader, Encrypted: !sqliteHeader}
+		for _, suffix := range []string{"-wal", "-shm"} {
+			sidecar := path + suffix
+			if _, err := os.Stat(sidecar); err == nil {
+				db.Sidecars = append(db.Sidecars, sidecar)
+			}
+		}
+		out = append(out, db)
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Path < out[j].Path
+	})
 	return out
 }
 

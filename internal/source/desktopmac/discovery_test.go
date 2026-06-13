@@ -15,6 +15,7 @@ func TestDiscoverFindsProfilesDatabasesAndMediaDirs(t *testing.T) {
 		filepath.Join(dbDir, "message_0.db-wal"),
 		filepath.Join(profileRoot, "msg", "file", "2026-06", "sample.txt"),
 		filepath.Join(container, XWeChatRelativeRoot, "Backup", "placeholder"),
+		filepath.Join(container, XWeChatRelativeRoot, "all_users", "login", "wxid_fixture", "key_info.db-wal"),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -27,6 +28,10 @@ func TestDiscoverFindsProfilesDatabasesAndMediaDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dbDir, "message_1.db"), []byte("encrypted-ish"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyInfoDB := filepath.Join(container, XWeChatRelativeRoot, "all_users", "login", "wxid_fixture", "key_info.db")
+	if err := os.WriteFile(keyInfoDB, append([]byte("SQLite format 3\x00"), []byte("key-info")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	disc := Discover(t.Context(), container)
@@ -54,5 +59,8 @@ func TestDiscoverFindsProfilesDatabasesAndMediaDirs(t *testing.T) {
 	}
 	if len(disc.BackupDirs) != 1 {
 		t.Fatalf("backup dirs = %#v", disc.BackupDirs)
+	}
+	if disc.KeyInfoDBCount != 1 || len(disc.KeyInfoDatabases) != 1 || disc.KeyInfoDatabases[0].Role != "key_info" || len(disc.KeyInfoDatabases[0].Sidecars) != 1 {
+		t.Fatalf("key info dbs = %#v count=%d", disc.KeyInfoDatabases, disc.KeyInfoDBCount)
 	}
 }
