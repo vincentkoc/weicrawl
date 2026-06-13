@@ -241,6 +241,22 @@ func (e env) runDoctor(args []string) error {
 		{"id": "decrypted_snapshot_retention", "ok": !e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots, "enabled": e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots},
 		{"id": "probe_unlock_requested", "ok": !*probeUnlock || sqlcipherErr == nil, "skipped": !*probeUnlock, "note": "probe requires sqlcipher and an external key manifest"},
 	}
+	if *probeUnlock && (strings.TrimSpace(*keysPath) == "" || strings.TrimSpace(*snapshotPath) == "") {
+		missing := []string{}
+		if strings.TrimSpace(*keysPath) == "" {
+			missing = append(missing, "--keys")
+		}
+		if strings.TrimSpace(*snapshotPath) == "" {
+			missing = append(missing, "--snapshot")
+		}
+		checks = append(checks, map[string]any{
+			"id":      "unlock_readiness",
+			"ok":      false,
+			"skipped": true,
+			"missing": missing,
+			"note":    "pass --keys and --snapshot to probe unlock readiness without decrypting",
+		})
+	}
 	if *probeUnlock && strings.TrimSpace(*keysPath) != "" && strings.TrimSpace(*snapshotPath) != "" {
 		check, err := unlock.CheckSnapshotKeys(unlock.DecryptOptions{
 			SnapshotDir:   config.Expand(*snapshotPath),

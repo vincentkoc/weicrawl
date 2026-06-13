@@ -537,6 +537,28 @@ func TestDoctorProbeUnlockChecksManifestSnapshot(t *testing.T) {
 	}
 }
 
+func TestDoctorProbeUnlockReportsMissingInputs(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	code, out, errOut := runForTest("--json", "doctor", "--probe-unlock")
+	if code != 0 {
+		t.Fatalf("doctor code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	check := doctorCheck(t, payload, "unlock_readiness")
+	if check["ok"].(bool) || !check["skipped"].(bool) {
+		t.Fatalf("unlock readiness check = %#v", check)
+	}
+	missing := fmt.Sprint(check["missing"])
+	if !strings.Contains(missing, "--keys") || !strings.Contains(missing, "--snapshot") {
+		t.Fatalf("missing inputs = %#v", check["missing"])
+	}
+}
+
 func TestUnlockForgetReportsNoPersistedMaterial(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))
