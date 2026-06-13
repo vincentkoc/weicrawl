@@ -1568,6 +1568,72 @@ func TestCLIKeyScanRequiresExplicitProcessInspect(t *testing.T) {
 	}
 }
 
+func TestCLIInitGuidesAndSetsUpKeys(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	snapshotDB := filepath.Join(root, "snapshot", "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(snapshotDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapshotDB, []byte("encrypted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errOut := runForTest("--json", "init")
+	if code != 0 {
+		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	keySetup := payload["key_setup"].(map[string]any)
+	if keySetup["scanner_contract"] != "docs/unlock-extractors.md" || !keySetup["safe_by_default"].(bool) {
+		t.Fatalf("key setup guide missing: %#v", keySetup)
+	}
+	if fmt.Sprint(keySetup["next"]) == "" {
+		t.Fatalf("key setup next missing: %#v", keySetup)
+	}
+
+	templatePath := filepath.Join(root, "wechat_keys.template.json")
+	code, out, errOut = runForTest("--json", "init", "--snapshot", filepath.Join(root, "snapshot"), "--key-template-out", templatePath)
+	if code != 0 {
+		t.Fatalf("init template code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	keySetup = payload["key_setup"].(map[string]any)
+	if keySetup["status"] != "template_written" {
+		t.Fatalf("template status missing: %#v", keySetup)
+	}
+	if _, err := os.Stat(templatePath); err != nil {
+		t.Fatalf("template not written: %v", err)
+	}
+
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+strings.Repeat("a", 64)+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = runForTest("--json", "init", "--snapshot", filepath.Join(root, "snapshot"), "--keys", keysPath)
+	if code != 0 {
+		t.Fatalf("init keys code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	keySetup = payload["key_setup"].(map[string]any)
+	if keySetup["status"] != "keys_checked" {
+		t.Fatalf("keys status missing: %#v", keySetup)
+	}
+	validation := keySetup["validation"].(map[string]any)
+	if !validation["ready"].(bool) || int(validation["key_count"].(float64)) != 1 {
+		t.Fatalf("validation = %#v", validation)
+	}
+}
+
 func TestCLIUnlockTemplateWritesPlaceholderManifest(t *testing.T) {
 	root := t.TempDir()
 	snapshotDB := filepath.Join(root, "snapshot", "db_storage", "message", "message_0.db")

@@ -181,6 +181,11 @@ func (e env) run(args []string) error {
 func (e env) runInit(args []string) error {
 	fs := newFlagSet("init")
 	overwrite := fs.Bool("overwrite", false, "overwrite existing config")
+	snapshotPath := fs.String("snapshot", "", "copied snapshot profile root for key setup")
+	keysPath := fs.String("keys", "", "wechat_keys.json path to validate during key setup")
+	templateOut := fs.String("key-template-out", "", "write a placeholder key manifest template for the copied snapshot")
+	probeDecrypt := fs.Bool("probe-decrypt", false, "verify supplied keys can open copied DBs")
+	sqlcipherPath := fs.String("sqlcipher", "", "sqlcipher binary path for key probe")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -193,12 +198,95 @@ func (e env) runInit(args []string) error {
 		return err
 	}
 	defer arc.Close()
+	keySetup, err := e.initKeySetup(*snapshotPath, *keysPath, *templateOut, *probeDecrypt, *sqlcipherPath)
+	if err != nil {
+		return err
+	}
 	return e.write("init", map[string]any{
 		"config_path":    loaded.Path,
 		"config_created": created,
 		"database_path":  arc.Path(),
 		"schema_version": schema.Version,
+		"key_setup":      keySetup,
 	})
+}
+
+func (e env) initKeySetup(snapshotPath, keysPath, templateOut string, probeDecrypt bool, sqlcipherPath string) (map[string]any, error) {
+	snapshotPath = config.Expand(snapshotPath)
+	keysPath = config.Expand(keysPath)
+	templateOut = config.Expand(templateOut)
+	sqlcipherPath = config.Expand(sqlcipherPath)
+
+	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
+	resolvedSQLCipher, sqlcipherErr := unlock.FindSQLCipher(sqlcipherPath)
+	steps := []map[string]any{
+		{"id": "copy_snapshot", "argv": []string{"weicrawl", "--json", "sync", "--source", "desktop-macos", "--keep-source-snapshot"}},
+		{"id": "write_template", "argv": []string{"weicrawl", "--json", "unlock", "template", "--snapshot", "<copied-profile-root>", "--out", "./wechat_keys.template.json"}},
+		{"id": "run_reviewed_scanner", "argv": []string{"weicrawl", "--json", "unlock", "scan-keys", "--allow-process-inspect", "--execute", "--script", "<reviewed-helper>", "--scan-out", "./wechat_keys.json"}},
+		{"id": "validate_keys", "argv": []string{"weicrawl", "--json", "unlock", "validate", "--keys", "./wechat_keys.json", "--snapshot", "<copied-profile-root>"}},
+		{"id": "probe_decrypt", "argv": []string{"weicrawl", "--json", "unlock", "desktop", "--explain", "--probe-decrypt", "--keys", "./wechat_keys.json", "--snapshot", "<copied-profile-root>"}},
+		{"id": "import_decrypted", "argv": []string{"weicrawl", "--json", "unlock", "desktop", "--keys", "./wechat_keys.json", "--snapshot", "<copied-profile-root>", "--out", "./decrypted", "--sync"}},
+	}
+	payload := map[string]any{
+		"status":              "guide",
+		"safe_by_default":     true,
+		"scanner_contract":    "docs/unlock-extractors.md",
+		"example_scanner":     "scripts/wechat-key-scanner.example.py",
+		"default_manifest":    "wechat_keys.json",
+		"snapshot_required":   true,
+		"wechat_running":      disc.Running,
+		"sqlcipher":           resolvedSQLCipher,
+		"sqlcipher_available": sqlcipherErr == nil,
+		"commands":            steps,
+		"warnings":            []string{"key_info.db is metadata, not a filled key manifest", "do not commit wechat_keys.json", "weicrawl does not attach to WeChat unless an explicit external scanner is executed"},
+		"next":                "run sync with --keep-source-snapshot, fill or scan wechat_keys.json, then validate and probe decrypt",
+	}
+	if sqlcipherErr != nil {
+		payload["sqlcipher_error"] = sqlcipherErr.Error()
+	}
+
+	if strings.TrimSpace(templateOut) != "" {
+		if strings.TrimSpace(snapshotPath) == "" {
+			return nil, output.UsageError{Err: errors.New("init --key-template-out requires --snapshot")}
+		}
+		template, err := unlock.WriteKeyManifestTemplate(snapshotPath, templateOut)
+		if err != nil {
+			return nil, err
+		}
+		payload["status"] = "template_written"
+		payload["template"] = template
+		payload["next"] = "fill the template with reviewed key material or run a reviewed scanner, then rerun init with --keys and --snapshot"
+	}
+
+	if strings.TrimSpace(keysPath) != "" {
+		if strings.TrimSpace(snapshotPath) == "" {
+			return nil, output.UsageError{Err: errors.New("init --keys requires --snapshot")}
+		}
+		opts := unlock.DecryptOptions{
+			SnapshotDir:   snapshotPath,
+			KeysPath:      keysPath,
+			SQLCipherPath: resolvedSQLCipher,
+		}
+		var check unlock.KeyReadiness
+		var err error
+		if probeDecrypt {
+			check, err = unlock.ProbeSnapshotKeys(e.ctx, opts)
+		} else {
+			check, err = unlock.ValidateSnapshotKeys(opts)
+		}
+		if err != nil {
+			return nil, err
+		}
+		payload["status"] = "keys_checked"
+		payload["validation"] = check
+		payload["probe_decrypt"] = probeDecrypt
+		if check.Ready && (!probeDecrypt || check.ProbeReady) {
+			payload["next"] = "run `weicrawl unlock desktop --keys <manifest> --snapshot <copied-profile-root> --out ./decrypted --sync`"
+		} else {
+			payload["next"] = "fix missing or failing keys, then rerun init with --keys and --snapshot"
+		}
+	}
+	return payload, nil
 }
 
 func (e env) runDoctor(args []string) error {

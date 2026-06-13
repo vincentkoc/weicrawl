@@ -59,6 +59,20 @@ The default desktop sync copies local DBs first. If they are encrypted, the sync
 records the profile and snapshot provenance, then warns that no readable tables
 were imported.
 
+`init` also returns a `key_setup` guide. To write the reviewed-key template or
+check a filled manifest from the same setup surface:
+
+```bash
+go run ./cmd/weicrawl --json init \
+  --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile> \
+  --key-template-out ./wechat_keys.template.json
+
+go run ./cmd/weicrawl --json init \
+  --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile> \
+  --keys ./wechat_keys.json \
+  --probe-decrypt
+```
+
 To run every configured local source plus any explicitly selected artifact
 sources:
 
@@ -149,6 +163,9 @@ The full helper contract is documented in `docs/unlock-extractors.md`.
 `scripts/wechat-key-scanner.example.py` is a non-invasive adapter fixture for
 testing the contract with `WEICRAWL_WECHAT_SQLCIPHER_KEY`; it is not a WeChat
 key extractor.
+
+The repo also ships `.agents/skills/weicrawl/SKILL.md` for coding agents that
+need the pull/build/init/key-proof workflow.
 
 `unlock desktop --explain --probe-decrypt` is still read-only and does not write
 plaintext DBs. It asks `sqlcipher` to open the copied snapshot DBs with the

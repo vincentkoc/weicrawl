@@ -500,6 +500,34 @@ Public commands:
 - `tui`
 - `completion`
 
+### `init`
+
+Purpose:
+
+- create the config and archive DB
+- guide copied-snapshot key setup
+- optionally write a placeholder key manifest template
+- optionally validate or read-only probe a filled key manifest
+
+Expected flags:
+
+- `--overwrite`
+- `--snapshot <copied-profile-root>`
+- `--key-template-out <path>`
+- `--keys <wechat_keys.json>`
+- `--probe-decrypt`
+- `--sqlcipher <path>`
+
+Rules:
+
+- init must not attach to WeChat or execute a scanner
+- key setup output must explain the reviewed external scanner contract
+- writing a key template requires `--snapshot`
+- validating keys requires `--snapshot` and `--keys`
+- `--probe-decrypt` may ask SQLCipher to open copied DBs, but must not write
+  plaintext DBs
+- init must never persist raw keys
+
 ### `doctor`
 
 Must check:
