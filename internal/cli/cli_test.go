@@ -1563,6 +1563,9 @@ func TestCLIKeyScanRequiresExplicitProcessInspect(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(nestedPlan["notes"]), "per-database keys") {
 		t.Fatalf("scan plan notes should mention per-database keys: %#v", nestedPlan)
 	}
+	if !strings.Contains(fmt.Sprint(nestedPlan["notes"]), "WEICRAWL_SCAN_OUT") {
+		t.Fatalf("scan plan notes should mention scanner env contract: %#v", nestedPlan)
+	}
 }
 
 func TestCLIUnlockTemplateWritesPlaceholderManifest(t *testing.T) {

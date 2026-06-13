@@ -145,6 +145,11 @@ If a helper prints a valid `wechat_keys.json` object to stdout, even with
 surrounding logs, `weicrawl` writes that object to `--scan-out` instead of
 reducing it to a single default key.
 
+The full helper contract is documented in `docs/unlock-extractors.md`.
+`scripts/wechat-key-scanner.example.py` is a non-invasive adapter fixture for
+testing the contract with `WEICRAWL_WECHAT_SQLCIPHER_KEY`; it is not a WeChat
+key extractor.
+
 `unlock desktop --explain --probe-decrypt` is still read-only and does not write
 plaintext DBs. It asks `sqlcipher` to open the copied snapshot DBs with the
 supplied keys and reports whether the keys actually work.

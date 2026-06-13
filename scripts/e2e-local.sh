@@ -180,11 +180,12 @@ fi
 "$weicrawl" --json unlock status > "$tmpdir/unlock-status.json"
 "$weicrawl" --json unlock scan-keys --allow-process-inspect > "$tmpdir/scan-plan.json"
 "$weicrawl" --json unlock template --snapshot "$snapshot_path" --out "$tmpdir/wechat_keys.template.json" > "$tmpdir/unlock-template.json"
-python3 - "$tmpdir/wechat_keys.synthetic.json" <<'PY'
-import json
-import sys
-json.dump({"__default_key": "0" * 64}, open(sys.argv[1], "w"))
-PY
+env WEICRAWL_WECHAT_SQLCIPHER_KEY="$(printf '%064d' 0)" \
+  "$weicrawl" --json unlock scan-keys \
+    --allow-process-inspect \
+    --execute \
+    --script ./scripts/wechat-key-scanner.example.py \
+    --scan-out "$tmpdir/wechat_keys.synthetic.json" > "$tmpdir/scan-execute.json"
 "$weicrawl" --json unlock validate --snapshot "$snapshot_path" --keys "$tmpdir/wechat_keys.synthetic.json" > "$tmpdir/unlock-validate.json"
 env WEICRAWL_WECHAT_APP_ID=official-app \
   WEICRAWL_WECHAT_APP_SECRET=official-secret \
@@ -233,6 +234,11 @@ if "per-database keys" not in notes:
     raise SystemExit(f"scan plan does not mention per-database keys: {scan}")
 if not isinstance(scan.get("wechat_running"), bool):
     raise SystemExit(f"scan plan did not report wechat_running: {scan}")
+scan_execute = payloads["scan-execute"]
+if scan_execute.get("method") != "external-key-scanner" or not scan_execute.get("available") or not scan_execute.get("manifest_path"):
+    raise SystemExit(f"scan execute failed contract: {scan_execute}")
+if scan_execute.get("persisted") or not isinstance(scan_execute.get("wechat_running"), bool):
+    raise SystemExit(f"scan execute leaked persistence/running contract: {scan_execute}")
 
 template = payloads["unlock-template"]
 if template.get("method") != "key-manifest-template" or template.get("db_count", 0) <= 0:

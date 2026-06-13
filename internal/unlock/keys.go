@@ -101,6 +101,7 @@ func BuildKeyScanPlan(allowProcessInspect, execute bool, scriptPath, outputPath 
 			"requires WeChat running",
 			"WeChat 4.x extractors should prefer per-database keys keyed by db_storage-relative paths",
 			"may require SIP/debug permissions depending on macOS setup",
+			"receives WEICRAWL_SCAN_OUT and WEICRAWL_KEY_MANIFEST",
 			"writes a wechat_keys.json-style manifest; do not commit it",
 		},
 	}
