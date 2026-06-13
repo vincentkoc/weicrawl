@@ -143,6 +143,21 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if fmt.Sprint(copiedMediaRow["archive_path"]) != copiedMedia {
 		t.Fatalf("copied media archive_path = %#v want %s", copiedMediaRow, copiedMedia)
 	}
+	code, out, errOut = runForTest("--json", "sync", "--profile", "wxid_fixture", "--include-media")
+	if code != 0 {
+		t.Fatalf("sync media metadata after copy code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	code, out, errOut = runForTest("--json", "media")
+	if code != 0 {
+		t.Fatalf("media list after metadata resync code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &mediaList); err != nil {
+		t.Fatal(err)
+	}
+	resyncedMediaRow := mediaList["values"].([]any)[0].(map[string]any)
+	if fmt.Sprint(resyncedMediaRow["archive_path"]) != copiedMedia {
+		t.Fatalf("metadata resync should preserve copied archive_path: %#v want %s", resyncedMediaRow, copiedMedia)
+	}
 
 	code, out, errOut = runForTest("--json", "status")
 	if code != 0 {
