@@ -117,6 +117,22 @@ func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, prof
 			result.Chats++
 		}
 	}
+	if tables["weicrawl_fixture_chat_members"] {
+		rows, err := db.QueryContext(ctx, `select chat_id, contact_id, coalesce(display_name,''), coalesce(raw_json,'{}') from weicrawl_fixture_chat_members order by chat_id, contact_id`)
+		if err != nil {
+			return result, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			member := archive.ChatMember{ProfileID: profileID}
+			if err := rows.Scan(&member.ChatID, &member.ContactID, &member.DisplayName, &member.RawJSON); err != nil {
+				return result, err
+			}
+			if err := arc.UpsertChatMember(ctx, member); err != nil {
+				return result, err
+			}
+		}
+	}
 	if tables["weicrawl_fixture_messages"] {
 		rows, err := db.QueryContext(ctx, `select message_id, chat_id, coalesce(sender_id,''), coalesce(direction,'unknown'), coalesce(message_type,'unsupported'), coalesce(sent_at,''), coalesce(text,''), coalesce(normalized_text,''), coalesce(source_rowid,message_id), coalesce(raw_json,'{}') from weicrawl_fixture_messages`)
 		if err != nil {

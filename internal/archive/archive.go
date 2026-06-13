@@ -104,6 +104,14 @@ type MessagePart struct {
 	RawJSON   string `json:"raw_json,omitempty"`
 }
 
+type ChatMember struct {
+	ProfileID   string `json:"profile_id"`
+	ChatID      string `json:"chat_id"`
+	ContactID   string `json:"contact_id"`
+	DisplayName string `json:"display_name,omitempty"`
+	RawJSON     string `json:"raw_json,omitempty"`
+}
+
 type MessageEvent struct {
 	ProfileID   string `json:"profile_id"`
 	ChatID      string `json:"chat_id"`
@@ -301,6 +309,13 @@ func (a *Archive) UpsertChat(ctx context.Context, profileID, chatID, kind, title
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := a.store.DB().ExecContext(ctx, `insert into chats(profile_id, chat_id, kind, title, last_message_at, unread_count, muted, pinned, raw_json, updated_at) values(?,?,?,?,?,?,?,?,?,?) on conflict(profile_id, chat_id) do update set kind=excluded.kind, title=excluded.title, last_message_at=excluded.last_message_at, unread_count=excluded.unread_count, muted=excluded.muted, pinned=excluded.pinned, raw_json=excluded.raw_json, updated_at=excluded.updated_at`,
 		profileID, chatID, defaultString(kind, "unknown"), nullEmpty(title), nullEmpty(lastMessageAt), unread, boolInt(muted), boolInt(pinned), marshalRaw(raw), now)
+	return err
+}
+
+func (a *Archive) UpsertChatMember(ctx context.Context, member ChatMember) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := a.store.DB().ExecContext(ctx, `insert into chat_members(profile_id, chat_id, contact_id, display_name, raw_json, updated_at) values(?,?,?,?,?,?) on conflict(profile_id, chat_id, contact_id) do update set display_name=excluded.display_name, raw_json=excluded.raw_json, updated_at=excluded.updated_at`,
+		member.ProfileID, member.ChatID, member.ContactID, nullEmpty(member.DisplayName), defaultString(member.RawJSON, "{}"), now)
 	return err
 }
 

@@ -228,6 +228,7 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 		"profile":       1,
 		"contact":       1,
 		"chat":          1,
+		"chat_member":   1,
 		"message":       2,
 		"message_part":  1,
 		"message_event": 1,
@@ -871,6 +872,7 @@ func createFixtureDB(t *testing.T, path string) {
 	schema := `
 create table weicrawl_fixture_contacts(contact_id text, alias text, display_name text, remark_name text, kind text, avatar_ref text, raw_json text);
 create table weicrawl_fixture_chats(chat_id text, kind text, title text, last_message_at text, unread_count integer, muted integer, pinned integer, raw_json text);
+create table weicrawl_fixture_chat_members(chat_id text, contact_id text, display_name text, raw_json text);
 create table weicrawl_fixture_messages(message_id text, chat_id text, sender_id text, direction text, message_type text, sent_at text, text text, normalized_text text, source_rowid text, raw_json text);
 create table weicrawl_fixture_message_parts(message_id text, part_index integer, kind text, text text, media_id text, url text, raw_json text);
 create table weicrawl_fixture_message_events(chat_id text, message_id text, event_type text, event_at text, payload_json text);
@@ -878,6 +880,7 @@ create table weicrawl_fixture_favorites(favorite_id text, kind text, title text,
 create table weicrawl_fixture_moments(moment_id text, author_id text, text text, created_at text, raw_json text);
 insert into weicrawl_fixture_contacts values('alice', 'alice', 'Alice', '', 'user', '', '{}');
 insert into weicrawl_fixture_chats values('chat-1', 'direct', 'Alice', '2026-06-13T01:00:00Z', 0, 0, 0, '{}');
+insert into weicrawl_fixture_chat_members values('chat-1', 'alice', 'Alice', '{}');
 insert into weicrawl_fixture_messages values('m1', 'chat-1', 'alice', 'inbound', 'text', '2026-06-13T01:00:00Z', 'hello from fixture', 'hello from fixture', '1', '{}');
 insert into weicrawl_fixture_messages values('m2', 'chat-1', 'alice', 'inbound', 'text', '2026-06-13T02:00:00Z', '航班 changed', '航班 changed', '2', '{}');
 insert into weicrawl_fixture_message_parts values('m2', 0, 'link', 'boarding pass link', '', 'https://example.invalid/boarding', '{}');
