@@ -169,20 +169,29 @@ func (e env) runDoctor(args []string) error {
 	}
 	arc, dbErr := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 	var schemaVersion int
+	ftsOK := false
+	var ftsErr error
 	if dbErr == nil {
 		defer arc.Close()
 		schemaVersion, _ = arc.SchemaVersion(e.ctx)
+		ftsOK, ftsErr = checkFTSHealth(e.ctx, arc)
 	}
 	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
 	sqlcipherPath, sqlcipherErr := unlock.FindSQLCipher("")
+	metadataOK, metadataErr := checkControlMetadata()
 	checks := []map[string]any{
 		{"id": "config_readable", "ok": true, "path": e.loaded.Path},
 		{"id": "archive_db_openable", "ok": dbErr == nil, "path": e.loaded.Config.Archive.DBPath, "error": errString(dbErr)},
 		{"id": "schema_version", "ok": schemaVersion == schema.Version, "current": schemaVersion, "want": schema.Version},
+		{"id": "fts_health", "ok": dbErr == nil && ftsOK, "error": errString(ftsErr)},
+		{"id": "crawlkit_metadata_valid", "ok": metadataOK, "error": errString(metadataErr)},
 		{"id": "wechat_app_present", "ok": disc.AppPresent, "path": disc.AppPath, "version": disc.AppVersion},
+		{"id": "wechat_running", "ok": true, "running": disc.Running},
 		{"id": "wechat_container_present", "ok": disc.ContainerPresent, "path": disc.ContainerPath},
 		{"id": "profile_discovery", "ok": len(disc.ProfileRoots) > 0, "profiles": len(disc.ProfileRoots)},
 		{"id": "database_shards", "ok": disc.DatabaseCount > 0, "count": disc.DatabaseCount},
+		{"id": "source_db_encryption_probe", "ok": true, "encrypted_count": disc.EncryptedDBCount, "database_count": disc.DatabaseCount},
+		{"id": "backup_discovery", "ok": true, "backup_dirs": len(disc.BackupDirs)},
 		{"id": "unlock_configured", "ok": e.loaded.Config.Unlock.AllowProcessInspect || e.loaded.Config.Unlock.AllowKeychain || e.loaded.Config.Unlock.StoreKeychain},
 		{"id": "unlock_key_manifest_supported", "ok": true, "method": "unlock desktop --keys <wechat_keys.json> --snapshot <copied-profile-root> --out <decrypted-dir>"},
 		{"id": "sqlcipher_available", "ok": sqlcipherErr == nil, "path": sqlcipherPath, "error": errString(sqlcipherErr)},
@@ -241,6 +250,39 @@ func (e env) runStatus() error {
 			},
 		},
 	})
+}
+
+func checkFTSHealth(ctx context.Context, arc *archive.Archive) (bool, error) {
+	for _, table := range []string{"message_fts", "article_fts"} {
+		var exists int
+		if err := arc.DB().QueryRowContext(ctx, `select count(*) from sqlite_master where type = 'table' and name = ?`, table).Scan(&exists); err != nil {
+			return false, err
+		}
+		if exists != 1 {
+			return false, fmt.Errorf("%s missing", table)
+		}
+		var count int64
+		if err := arc.DB().QueryRowContext(ctx, `select count(*) from `+quoteSQLIdent(table)).Scan(&count); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func checkControlMetadata() (bool, error) {
+	meta := manifest()
+	if strings.TrimSpace(meta.ID) != "weicrawl" {
+		return false, fmt.Errorf("manifest id = %q", meta.ID)
+	}
+	if strings.TrimSpace(meta.Binary.Name) != "weicrawl" {
+		return false, fmt.Errorf("manifest binary = %q", meta.Binary.Name)
+	}
+	for _, command := range []string{"doctor", "status", "sync", "search", "tui"} {
+		if _, ok := meta.Commands[command]; !ok {
+			return false, fmt.Errorf("manifest missing command %q", command)
+		}
+	}
+	return true, nil
 }
 
 func (e env) runSync(args []string) error {

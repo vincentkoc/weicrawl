@@ -62,6 +62,15 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if desktop := doctor["desktop_macos"].(map[string]any); int(desktop["database_count"].(float64)) != 1 {
 		t.Fatalf("doctor desktop = %#v", desktop)
 	}
+	if check := doctorCheck(t, doctor, "fts_health"); !check["ok"].(bool) {
+		t.Fatalf("fts check = %#v", check)
+	}
+	if check := doctorCheck(t, doctor, "crawlkit_metadata_valid"); !check["ok"].(bool) {
+		t.Fatalf("metadata check = %#v", check)
+	}
+	if check := doctorCheck(t, doctor, "source_db_encryption_probe"); int(check["encrypted_count"].(float64)) != 0 {
+		t.Fatalf("encryption check = %#v", check)
+	}
 
 	code, out, errOut = runForTest("--json", "sync", "--profile", "wxid_fixture", "--include-media")
 	if code != 0 {
@@ -506,6 +515,19 @@ func readJSONLEntityCounts(t *testing.T, path string) map[string]int {
 		t.Fatal(err)
 	}
 	return counts
+}
+
+func doctorCheck(t *testing.T, doctor map[string]any, id string) map[string]any {
+	t.Helper()
+	checks := doctor["checks"].([]any)
+	for _, value := range checks {
+		check := value.(map[string]any)
+		if check["id"] == id {
+			return check
+		}
+	}
+	t.Fatalf("doctor check %q missing: %#v", id, checks)
+	return nil
 }
 
 func createNativeContactDB(t *testing.T, path string) {

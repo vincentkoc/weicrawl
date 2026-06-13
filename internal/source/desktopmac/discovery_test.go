@@ -12,9 +12,9 @@ func TestDiscoverFindsProfilesDatabasesAndMediaDirs(t *testing.T) {
 	profileRoot := filepath.Join(container, XWeChatRelativeRoot, "wxid_fixture_abcd")
 	dbDir := filepath.Join(profileRoot, "db_storage", "message")
 	for _, path := range []string{
-		filepath.Join(dbDir, "message_0.db"),
 		filepath.Join(dbDir, "message_0.db-wal"),
 		filepath.Join(profileRoot, "msg", "file", "2026-06", "sample.txt"),
+		filepath.Join(container, XWeChatRelativeRoot, "Backup", "placeholder"),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -22,6 +22,12 @@ func TestDiscoverFindsProfilesDatabasesAndMediaDirs(t *testing.T) {
 		if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := os.WriteFile(filepath.Join(dbDir, "message_0.db"), append([]byte("SQLite format 3\x00"), []byte("fixture")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dbDir, "message_1.db"), []byte("encrypted-ish"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	disc := Discover(t.Context(), container)
 	if !disc.ContainerPresent {
@@ -34,10 +40,19 @@ func TestDiscoverFindsProfilesDatabasesAndMediaDirs(t *testing.T) {
 	if profile.Wxid != "wxid_fixture" {
 		t.Fatalf("wxid = %q", profile.Wxid)
 	}
-	if len(profile.Databases) != 1 || profile.Databases[0].Role != "message" || len(profile.Databases[0].Sidecars) != 1 {
+	if len(profile.Databases) != 2 || profile.Databases[0].Role != "message" || len(profile.Databases[0].Sidecars) != 1 {
 		t.Fatalf("databases = %#v", profile.Databases)
+	}
+	if !profile.Databases[0].SQLite || profile.Databases[0].Encrypted {
+		t.Fatalf("sqlite header classification = %#v", profile.Databases[0])
+	}
+	if !profile.Databases[1].Encrypted || disc.EncryptedDBCount != 1 {
+		t.Fatalf("encrypted classification = %#v count=%d", profile.Databases[1], disc.EncryptedDBCount)
 	}
 	if len(profile.MediaDirs) != 1 {
 		t.Fatalf("media dirs = %#v", profile.MediaDirs)
+	}
+	if len(disc.BackupDirs) != 1 {
+		t.Fatalf("backup dirs = %#v", disc.BackupDirs)
 	}
 }

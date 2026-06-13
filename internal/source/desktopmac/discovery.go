@@ -24,12 +24,15 @@ type Discovery struct {
 	BundleID         string    `json:"bundle_id,omitempty"`
 	AppVersion       string    `json:"app_version,omitempty"`
 	BundleVersion    string    `json:"bundle_version,omitempty"`
+	Running          bool      `json:"running"`
 	ContainerPath    string    `json:"container_path"`
 	XWeChatRoot      string    `json:"xwechat_root,omitempty"`
 	AppPresent       bool      `json:"app_present"`
 	ContainerPresent bool      `json:"container_present"`
 	ProfileRoots     []Profile `json:"profile_roots,omitempty"`
+	BackupDirs       []string  `json:"backup_dirs,omitempty"`
 	DatabaseCount    int       `json:"database_count"`
+	EncryptedDBCount int       `json:"encrypted_db_count"`
 	MediaDirCount    int       `json:"media_dir_count"`
 	Warnings         []string  `json:"warnings,omitempty"`
 }
@@ -43,10 +46,12 @@ type Profile struct {
 }
 
 type DBFile struct {
-	Path     string   `json:"path"`
-	Role     string   `json:"role"`
-	Size     int64    `json:"size"`
-	Sidecars []string `json:"sidecars,omitempty"`
+	Path      string   `json:"path"`
+	Role      string   `json:"role"`
+	Size      int64    `json:"size"`
+	SQLite    bool     `json:"sqlite"`
+	Encrypted bool     `json:"encrypted"`
+	Sidecars  []string `json:"sidecars,omitempty"`
 }
 
 func Discover(ctx context.Context, containerPath string) Discovery {
@@ -70,6 +75,7 @@ func Discover(ctx context.Context, containerPath string) Discovery {
 		if bundleID := plistValue(ctx, DefaultAppPath, "CFBundleIdentifier"); bundleID != "" {
 			out.BundleID = bundleID
 		}
+		out.Running = processRunning(ctx, DefaultBundleID, "WeChat")
 	} else if errors.Is(err, os.ErrNotExist) {
 		out.Warnings = append(out.Warnings, "WeChat.app was not found at /Applications/WeChat.app")
 	} else {
@@ -86,6 +92,7 @@ func Discover(ctx context.Context, containerPath string) Discovery {
 	}
 	root := filepath.Join(containerPath, XWeChatRelativeRoot)
 	out.XWeChatRoot = root
+	out.BackupDirs = findBackupDirs(root)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("read xwechat_files: %v", err))
@@ -111,6 +118,11 @@ func Discover(ctx context.Context, containerPath string) Discovery {
 		profile.Databases = findDatabases(profileRoot)
 		profile.MediaDirs = findMediaDirs(profileRoot)
 		out.DatabaseCount += len(profile.Databases)
+		for _, db := range profile.Databases {
+			if db.Encrypted {
+				out.EncryptedDBCount++
+			}
+		}
 		out.MediaDirCount += len(profile.MediaDirs)
 		out.ProfileRoots = append(out.ProfileRoots, profile)
 	}
@@ -138,6 +150,22 @@ func plistValue(ctx context.Context, appPath, key string) string {
 	return strings.TrimSpace(string(bytes))
 }
 
+func processRunning(ctx context.Context, bundleID, name string) bool {
+	if bundleID != "" {
+		cmd := exec.CommandContext(ctx, "pgrep", "-x", bundleID)
+		if err := cmd.Run(); err == nil {
+			return true
+		}
+	}
+	if name != "" {
+		cmd := exec.CommandContext(ctx, "pgrep", "-x", name)
+		if err := cmd.Run(); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func findDatabases(profileRoot string) []DBFile {
 	dbRoot := filepath.Join(profileRoot, "db_storage")
 	var out []DBFile
@@ -159,7 +187,8 @@ func findDatabases(profileRoot string) []DBFile {
 				role = parts[0]
 			}
 		}
-		db := DBFile{Path: path, Role: role, Size: info.Size()}
+		sqliteHeader := hasSQLiteHeader(path)
+		db := DBFile{Path: path, Role: role, Size: info.Size(), SQLite: sqliteHeader, Encrypted: !sqliteHeader}
 		for _, suffix := range []string{"-wal", "-shm"} {
 			sidecar := path + suffix
 			if _, err := os.Stat(sidecar); err == nil {
@@ -172,6 +201,34 @@ func findDatabases(profileRoot string) []DBFile {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Path < out[j].Path
 	})
+	return out
+}
+
+func hasSQLiteHeader(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	header := make([]byte, 16)
+	n, err := file.Read(header)
+	if err != nil || n < len(header) {
+		return false
+	}
+	return string(header) == "SQLite format 3\x00"
+}
+
+func findBackupDirs(xwechatRoot string) []string {
+	candidates := []string{
+		filepath.Join(xwechatRoot, "Backup"),
+		filepath.Join(filepath.Dir(xwechatRoot), "Backup"),
+	}
+	var out []string
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			out = append(out, candidate)
+		}
+	}
 	return out
 }
 
