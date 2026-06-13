@@ -112,6 +112,18 @@ go run ./cmd/weicrawl --json sync \
   --decrypted-dir ./decrypted
 ```
 
+`wechat_keys.json` may either map individual copied database paths to keys or
+provide one profile key:
+
+```json
+{
+  "__default_key": "<64-hex-sqlcipher-key>"
+}
+```
+
+The default key is applied to every `.db` file under the copied snapshot's
+`db_storage` tree. Per-database entries override it when needed.
+
 `wechat_keys.json` and decrypted DBs are ignored by git.
 
 ## exports

@@ -16,7 +16,8 @@ import (
 var hexKeyRE = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 type KeyManifest struct {
-	Keys map[string]string `json:"keys"`
+	Keys       map[string]string `json:"keys"`
+	DefaultKey string            `json:"-"`
 }
 
 type DecryptOptions struct {
@@ -45,6 +46,7 @@ type KeyReadiness struct {
 	KeysPath    string         `json:"keys_path"`
 	SQLCipher   string         `json:"sqlcipher,omitempty"`
 	KeyCount    int            `json:"key_count"`
+	DefaultKey  bool           `json:"default_key,omitempty"`
 	Found       []DecryptEntry `json:"found,omitempty"`
 	Missing     []DecryptEntry `json:"missing,omitempty"`
 	Ready       bool           `json:"ready"`
@@ -103,26 +105,74 @@ func ReadKeyManifest(path string) (KeyManifest, error) {
 	if err := json.Unmarshal(bytes, &raw); err != nil {
 		return KeyManifest{}, fmt.Errorf("parse key manifest: %w", err)
 	}
+	var defaultKey string
 	keys := map[string]string{}
 	for key, value := range raw {
+		if key == "__default_key" || key == "default_key" {
+			normalized, err := normalizeManifestKey("__default_key", value)
+			if err != nil {
+				return KeyManifest{}, err
+			}
+			defaultKey = normalized
+			continue
+		}
+		if key == "keys" {
+			nested, ok := value.(map[string]any)
+			if !ok {
+				return KeyManifest{}, errors.New("keys must be an object")
+			}
+			if err := readManifestKeyMap(keys, nested); err != nil {
+				return KeyManifest{}, err
+			}
+			continue
+		}
 		if strings.HasPrefix(key, "__") {
 			continue
 		}
-		stringValue, ok := value.(string)
-		if !ok {
-			continue
+		if err := readManifestKeyMap(keys, map[string]any{key: value}); err != nil {
+			return KeyManifest{}, err
 		}
-		stringValue = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(stringValue), "x'"), "0x")
-		stringValue = strings.TrimSuffix(stringValue, "'")
-		if !hexKeyRE.MatchString(stringValue) {
-			return KeyManifest{}, fmt.Errorf("invalid key for %s", key)
+	}
+	if len(keys) == 0 && defaultKey == "" {
+		return KeyManifest{}, errors.New("key manifest did not contain database keys or default key")
+	}
+	return KeyManifest{Keys: keys, DefaultKey: defaultKey}, nil
+}
+
+func readManifestKeyMap(keys map[string]string, raw map[string]any) error {
+	for key, value := range raw {
+		rel, err := cleanManifestRel(key)
+		if err != nil {
+			return err
 		}
-		keys[filepath.Clean(key)] = strings.ToLower(stringValue)
+		normalized, err := normalizeManifestKey(key, value)
+		if err != nil {
+			return err
+		}
+		keys[rel] = normalized
 	}
-	if len(keys) == 0 {
-		return KeyManifest{}, errors.New("key manifest did not contain database keys")
+	return nil
+}
+
+func normalizeManifestKey(name string, value any) (string, error) {
+	stringValue, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("invalid key for %s", name)
 	}
-	return KeyManifest{Keys: keys}, nil
+	stringValue = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(stringValue), "x'"), "0x")
+	stringValue = strings.TrimSuffix(stringValue, "'")
+	if !hexKeyRE.MatchString(stringValue) {
+		return "", fmt.Errorf("invalid key for %s", name)
+	}
+	return strings.ToLower(stringValue), nil
+}
+
+func cleanManifestRel(rel string) (string, error) {
+	clean := filepath.Clean(strings.TrimSpace(rel))
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid database path %q", rel)
+	}
+	return clean, nil
 }
 
 func DecryptSnapshot(ctx context.Context, opts DecryptOptions) (DecryptResult, error) {
@@ -145,8 +195,12 @@ func DecryptSnapshot(ctx context.Context, opts DecryptOptions) (DecryptResult, e
 	if _, err := os.Stat(dbRoot); err != nil {
 		return result, fmt.Errorf("stat snapshot db_storage: %w", err)
 	}
-	relPaths := make([]string, 0, len(keys.Keys))
-	for rel := range keys.Keys {
+	resolved, err := resolveSnapshotKeys(dbRoot, keys)
+	if err != nil {
+		return result, err
+	}
+	relPaths := make([]string, 0, len(resolved))
+	for rel := range resolved {
 		relPaths = append(relPaths, rel)
 	}
 	sort.Strings(relPaths)
@@ -157,7 +211,7 @@ func DecryptSnapshot(ctx context.Context, opts DecryptOptions) (DecryptResult, e
 			continue
 		}
 		dst := filepath.Join(opts.OutputDir, rel)
-		if err := decryptOne(ctx, sqlcipher, src, dst, keys.Keys[rel]); err != nil {
+		if err := decryptOne(ctx, sqlcipher, src, dst, resolved[rel]); err != nil {
 			result.Skipped = append(result.Skipped, DecryptEntry{Database: rel, Reason: err.Error()})
 			continue
 		}
@@ -186,8 +240,14 @@ func CheckSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
 	if _, err := os.Stat(dbRoot); err != nil {
 		return result, fmt.Errorf("stat snapshot db_storage: %w", err)
 	}
-	relPaths := make([]string, 0, len(keys.Keys))
-	for rel := range keys.Keys {
+	resolved, err := resolveSnapshotKeys(dbRoot, keys)
+	if err != nil {
+		return result, err
+	}
+	result.KeyCount = len(resolved)
+	result.DefaultKey = keys.DefaultKey != ""
+	relPaths := make([]string, 0, len(resolved))
+	for rel := range resolved {
 		relPaths = append(relPaths, rel)
 	}
 	sort.Strings(relPaths)
@@ -201,6 +261,34 @@ func CheckSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
 	}
 	result.Ready = len(result.Found) > 0 && len(result.Missing) == 0
 	return result, nil
+}
+
+func resolveSnapshotKeys(dbRoot string, manifest KeyManifest) (map[string]string, error) {
+	keys := map[string]string{}
+	for rel, key := range manifest.Keys {
+		keys[rel] = key
+	}
+	if manifest.DefaultKey == "" {
+		return keys, nil
+	}
+	err := filepath.WalkDir(dbRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			return nil
+		}
+		rel, err := filepath.Rel(dbRoot, path)
+		if err != nil {
+			return err
+		}
+		rel, err = cleanManifestRel(rel)
+		if err != nil {
+			return err
+		}
+		if _, ok := keys[rel]; !ok {
+			keys[rel] = manifest.DefaultKey
+		}
+		return nil
+	})
+	return keys, err
 }
 
 func FindSQLCipher(configured string) (string, error) {

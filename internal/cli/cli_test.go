@@ -1141,7 +1141,7 @@ func TestCLIUnlockDecryptThenSyncEncryptedFixture(t *testing.T) {
 	}
 	encryptSQLiteFixture(t, sqlcipher, plain, encrypted, key)
 	keysPath := filepath.Join(root, "wechat_keys.json")
-	if err := os.WriteFile(keysPath, []byte(`{"message/message_0.db":"`+key+`"}`), 0o600); err != nil {
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+key+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	decryptedDir := filepath.Join(root, "decrypted")
@@ -1155,6 +1155,10 @@ func TestCLIUnlockDecryptThenSyncEncryptedFixture(t *testing.T) {
 	}
 	if unlockPayload["method"] != "key-manifest+sqlcipher" || unlockPayload["persisted"].(bool) {
 		t.Fatalf("unlock payload = %#v", unlockPayload)
+	}
+	decrypt := unlockPayload["decrypt"].(map[string]any)
+	if len(decrypt["decrypted"].([]any)) != 1 {
+		t.Fatalf("decrypt payload = %#v", decrypt)
 	}
 	if !strings.Contains(fmt.Sprint(unlockPayload["next"]), "--decrypted-dir") {
 		t.Fatalf("unlock next missing decrypted dir: %#v", unlockPayload)

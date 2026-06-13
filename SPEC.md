@@ -577,6 +577,22 @@ is a dry-run readiness check. It verifies the manifest shape, matching snapshot
 DB paths, and `sqlcipher` availability without writing decrypted files. Running
 without `--explain` requires `--out` and performs the decrypt.
 
+Key manifests must support both explicit per-database keys and one profile
+default key:
+
+```json
+{
+  "__default_key": "<64-hex-sqlcipher-key>",
+  "keys": {
+    "message/message_0.db": "<optional-override-key>"
+  }
+}
+```
+
+Default-key expansion is limited to `.db` files under the copied snapshot's
+`db_storage` tree. Manifest database paths must be relative and must not escape
+the decrypted output root.
+
 Output must include:
 
 - unlock method selected

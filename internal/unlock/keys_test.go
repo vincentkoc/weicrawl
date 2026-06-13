@@ -30,6 +30,41 @@ func TestReadKeyManifestAcceptsWechatKeyShape(t *testing.T) {
 	}
 }
 
+func TestReadKeyManifestAcceptsDefaultAndNestedKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wechat_keys.json")
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	override := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	if err := os.WriteFile(path, []byte(`{
+  "__default_key": "0x`+key+`",
+  "keys": {
+    "message/message_0.db": "x'`+override+`'"
+  }
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := ReadKeyManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.DefaultKey != key {
+		t.Fatalf("default key = %q", manifest.DefaultKey)
+	}
+	if manifest.Keys["message/message_0.db"] != override {
+		t.Fatalf("keys = %#v", manifest.Keys)
+	}
+}
+
+func TestReadKeyManifestRejectsPathTraversal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wechat_keys.json")
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := os.WriteFile(path, []byte(`{"../escape.db":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadKeyManifest(path); err == nil {
+		t.Fatal("expected path traversal error")
+	}
+}
+
 func TestReadKeyManifestRejectsBadKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wechat_keys.json")
 	if err := os.WriteFile(path, []byte(`{"message/message_0.db":"not-a-key"}`), 0o600); err != nil {
@@ -84,6 +119,40 @@ func TestDecryptSnapshotWithSQLCipherFixture(t *testing.T) {
 	}
 }
 
+func TestDecryptSnapshotWithDefaultKey(t *testing.T) {
+	sqlcipher, err := FindSQLCipher("")
+	if err != nil {
+		t.Skip(err)
+	}
+	root := t.TempDir()
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	for _, rel := range []string{"message/message_0.db", "contact/contact.db"} {
+		snapshotDB := filepath.Join(root, "snapshot", "db_storage", rel)
+		if err := os.MkdirAll(filepath.Dir(snapshotDB), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		plain := filepath.Join(root, strings.ReplaceAll(rel, "/", "-"))
+		createPlainNativeDB(t, plain)
+		encryptFixtureDB(t, sqlcipher, plain, snapshotDB, key)
+	}
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(root, "decrypted")
+	result, err := DecryptSnapshot(context.Background(), DecryptOptions{
+		SnapshotDir: filepath.Join(root, "snapshot"),
+		OutputDir:   outDir,
+		KeysPath:    keysPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Decrypted) != 2 {
+		t.Fatalf("decrypted = %#v", result.Decrypted)
+	}
+}
+
 func TestCheckSnapshotKeysDoesNotDecrypt(t *testing.T) {
 	root := t.TempDir()
 	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -117,6 +186,39 @@ func TestCheckSnapshotKeysDoesNotDecrypt(t *testing.T) {
 	}
 	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
 		t.Fatalf("dry-run created output dir: %v", err)
+	}
+}
+
+func TestCheckSnapshotKeysExpandsDefaultKey(t *testing.T) {
+	root := t.TempDir()
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	for _, rel := range []string{"message/message_0.db", "contact/contact.db"} {
+		snapshotDB := filepath.Join(root, "snapshot", "db_storage", rel)
+		if err := os.MkdirAll(filepath.Dir(snapshotDB), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(snapshotDB, []byte("encrypted"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sqlcipher := filepath.Join(root, "sqlcipher")
+	if err := os.WriteFile(sqlcipher, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	check, err := CheckSnapshotKeys(DecryptOptions{
+		SnapshotDir:   filepath.Join(root, "snapshot"),
+		KeysPath:      keysPath,
+		SQLCipherPath: sqlcipher,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !check.Ready || !check.DefaultKey || check.KeyCount != 2 || len(check.Found) != 2 {
+		t.Fatalf("check = %#v", check)
 	}
 }
 
