@@ -782,8 +782,19 @@ func (e env) runUnlock(args []string) error {
 		if err != nil {
 			return err
 		}
+		scanPayload := map[string]any{
+			"subcommand":   sub,
+			"method":       "external-key-scanner",
+			"app_version":  disc.AppVersion,
+			"profile":      *profile,
+			"persisted":    false,
+			"available":    plan.Allowed,
+			"version_gate": unlockVersionGate(disc.AppVersion),
+			"next":         "review the scanner command, then rerun with --execute to write a key manifest",
+			"plan":         plan,
+		}
 		if !*execute {
-			return e.write("unlock", plan)
+			return e.write("unlock", scanPayload)
 		}
 		out, err := unlock.ExecuteKeyScan(e.ctx, plan)
 		if err != nil {
@@ -795,14 +806,14 @@ func (e env) runUnlock(args []string) error {
 		if err != nil {
 			return fmt.Errorf("key scan manifest failed: %w\n%s", err, outputText)
 		}
-		return e.write("unlock", map[string]any{
-			"command":          plan.Command,
-			"manifest_path":    plan.OutputPath,
-			"manifest_written": written,
-			"output_redacted":  outputText,
-			"output_bytes":     len(out),
-			"redacted":         redacted,
-		})
+		scanPayload["command"] = plan.Command
+		scanPayload["manifest_path"] = plan.OutputPath
+		scanPayload["manifest_written"] = written
+		scanPayload["output_redacted"] = outputText
+		scanPayload["output_bytes"] = len(out)
+		scanPayload["redacted"] = redacted
+		scanPayload["next"] = "run `weicrawl unlock desktop --explain --probe-decrypt --keys <manifest> --snapshot <copied-profile-root>`"
+		return e.write("unlock", scanPayload)
 	case "forget":
 		payload["forgotten"] = false
 		payload["available"] = false
@@ -812,6 +823,19 @@ func (e env) runUnlock(args []string) error {
 		return output.UsageError{Err: fmt.Errorf("unknown unlock subcommand %q", sub)}
 	}
 	return e.write("unlock", payload)
+}
+
+func unlockVersionGate(appVersion string) map[string]any {
+	return map[string]any{
+		"app_version":                  appVersion,
+		"key_manifest_sqlcipher":       true,
+		"external_scanner":             true,
+		"native_process_inspect":       false,
+		"native_keychain":              false,
+		"native_methods_implemented":   []string{},
+		"requires_external_extractor":  true,
+		"supported_desktop_major_line": "4.1.x",
+	}
 }
 
 var keyScanSensitiveRE = regexp.MustCompile(`(?i)(?:0x|x')?[0-9a-f]{64}'?`)

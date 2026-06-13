@@ -1405,7 +1405,14 @@ func TestCLIKeyScanRequiresExplicitProcessInspect(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	if plan["execute"].(bool) {
+	if plan["method"] != "external-key-scanner" || plan["persisted"].(bool) {
+		t.Fatalf("scan plan contract fields missing: %#v", plan)
+	}
+	if fmt.Sprint(plan["next"]) == "" || plan["version_gate"] == nil {
+		t.Fatalf("scan plan next/version gate missing: %#v", plan)
+	}
+	nestedPlan := plan["plan"].(map[string]any)
+	if nestedPlan["execute"].(bool) {
 		t.Fatalf("plan unexpectedly executes: %#v", plan)
 	}
 }
@@ -1434,6 +1441,12 @@ printf "wrapped key: x'%064d'\n" 1
 	}
 	if !payload["redacted"].(bool) {
 		t.Fatalf("payload did not mark redaction: %#v", payload)
+	}
+	if payload["method"] != "external-key-scanner" || payload["persisted"].(bool) {
+		t.Fatalf("scan execute contract fields missing: %#v", payload)
+	}
+	if fmt.Sprint(payload["next"]) == "" || payload["version_gate"] == nil {
+		t.Fatalf("scan execute next/version gate missing: %#v", payload)
 	}
 	if !payload["manifest_written"].(bool) || fmt.Sprint(payload["manifest_path"]) != manifestPath {
 		t.Fatalf("manifest fields missing: %#v", payload)
