@@ -20,6 +20,7 @@ Implemented:
   `export`, `snapshot`, `import`, `tui`, and list commands
 - macOS WeChat app/container/profile/database discovery
 - read-only DB/WAL/SHM snapshot copy
+- user-selected `desktop-backup` root import
 - metadata-only or copied media indexing
 - decrypted/native WeChat table importer for:
   - `contact`
@@ -51,6 +52,14 @@ go run ./cmd/weicrawl --json status
 The default desktop sync copies local DBs first. If they are encrypted, the sync
 records the profile and snapshot provenance, then warns that no readable tables
 were imported.
+
+Backup or migration directories are only read when selected explicitly:
+
+```bash
+go run ./cmd/weicrawl --json sync \
+  --source desktop-backup \
+  --backup-root /path/to/copied/backup
+```
 
 ## decrypt/import flow
 

@@ -220,6 +220,48 @@ func TestOfficialAccountSyncSkipsWithoutCredentials(t *testing.T) {
 	}
 }
 
+func TestCLISyncDesktopBackup(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	backupRoot := filepath.Join(root, "backup-root")
+	createFixtureDB(t, filepath.Join(backupRoot, "db_storage", "message", "message_0.db"))
+
+	code, out, errOut := runForTest("--json", "init")
+	if code != 0 {
+		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	code, out, errOut = runForTest("--json", "sync", "--source", "desktop-backup", "--backup-root", backupRoot)
+	if code != 0 {
+		t.Fatalf("backup sync code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["source"] != "desktop-backup" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	if got := int(payload["imported_messages"].(float64)); got != 2 {
+		t.Fatalf("imported_messages = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_favorites"].(float64)); got != 1 {
+		t.Fatalf("imported_favorites = %d, payload=%#v", got, payload)
+	}
+	code, out, errOut = runForTest("--json", "runs", "--limit", "1")
+	if code != 0 {
+		t.Fatalf("runs code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var runs map[string]any
+	if err := json.Unmarshal(out.Bytes(), &runs); err != nil {
+		t.Fatal(err)
+	}
+	values := runs["values"].([]any)
+	if len(values) != 1 || values[0].(map[string]any)["source"] != "desktop-backup" {
+		t.Fatalf("runs = %#v", runs)
+	}
+}
+
 func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")
@@ -443,6 +485,9 @@ DETACH DATABASE encrypted;
 
 func createFixtureDB(t *testing.T, path string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)

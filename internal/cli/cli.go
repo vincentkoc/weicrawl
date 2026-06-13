@@ -20,6 +20,7 @@ import (
 	"github.com/vincentkoc/weicrawl/internal/archive"
 	"github.com/vincentkoc/weicrawl/internal/config"
 	"github.com/vincentkoc/weicrawl/internal/schema"
+	"github.com/vincentkoc/weicrawl/internal/source/backup"
 	"github.com/vincentkoc/weicrawl/internal/source/desktopmac"
 	"github.com/vincentkoc/weicrawl/internal/source/officialaccount"
 	"github.com/vincentkoc/weicrawl/internal/unlock"
@@ -249,6 +250,7 @@ func (e env) runSync(args []string) error {
 	keepSource := fs.Bool("keep-source-snapshot", e.loaded.Config.DesktopMacOS.KeepSourceSnapshots, "keep copied source snapshot")
 	keepDecrypted := fs.Bool("keep-decrypted-snapshot", e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots, "keep decrypted snapshot")
 	decryptedDir := fs.String("decrypted-dir", "", "import a decrypted db_storage tree")
+	backupRoot := fs.String("backup-root", "", "user-selected WeChat backup root")
 	_ = fs.Bool("full", false, "full sync")
 	_ = fs.String("since", "", "lower bound timestamp")
 	_ = fs.Int("concurrency", 1, "copy concurrency")
@@ -261,7 +263,7 @@ func (e env) runSync(args []string) error {
 	if *mediaMode != "" && *mediaMode != "metadata" && *mediaMode != "copy" {
 		return output.UsageError{Err: fmt.Errorf("unsupported media mode %q", *mediaMode)}
 	}
-	if *source != "desktop-macos" && *source != "all" && *source != "official-account-api" {
+	if *source != "desktop-macos" && *source != "desktop-backup" && *source != "all" && *source != "official-account-api" {
 		return output.UsageError{Err: fmt.Errorf("source %q is not implemented yet", *source)}
 	}
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
@@ -271,6 +273,16 @@ func (e env) runSync(args []string) error {
 	defer arc.Close()
 	if *source == "official-account-api" {
 		result, err := officialaccount.Sync(e.ctx, arc, officialaccount.Options{Config: e.loaded.Config.OfficialAccount})
+		if err != nil {
+			return err
+		}
+		return e.write("sync", result)
+	}
+	if *source == "desktop-backup" {
+		if strings.TrimSpace(*backupRoot) == "" {
+			return output.UsageError{Err: errors.New("--backup-root is required for desktop-backup")}
+		}
+		result, err := backup.Sync(e.ctx, arc, backup.Options{Root: config.Expand(*backupRoot), ProfileID: *profileFlag})
 		if err != nil {
 			return err
 		}
