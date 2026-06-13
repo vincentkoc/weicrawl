@@ -681,25 +681,31 @@ func (e env) runUnlock(args []string) error {
 		return err
 	}
 	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
+	resolvedSQLCipher, sqlcipherErr := unlock.FindSQLCipher(config.Expand(*sqlcipherPath))
 	payload := map[string]any{
-		"subcommand":  sub,
-		"method":      "none",
-		"app_version": disc.AppVersion,
-		"profile":     *profile,
-		"persisted":   false,
-		"next":        "run `weicrawl sync --source desktop-macos` after an unlock method is implemented",
+		"subcommand":   sub,
+		"method":       "none",
+		"app_version":  disc.AppVersion,
+		"profile":      *profile,
+		"persisted":    false,
+		"version_gate": unlockVersionGate(disc.AppVersion),
+		"next":         "run `weicrawl sync --source desktop-macos --keep-source-snapshot`, then probe a reviewed key manifest with `weicrawl unlock desktop --explain --probe-decrypt --keys <manifest> --snapshot <copied-profile-root>`",
 	}
 	switch sub {
 	case "status":
 		payload["configured"] = e.loaded.Config.Unlock
-		payload["available"] = false
+		payload["available"] = sqlcipherErr == nil
+		payload["available_methods"] = availableUnlockMethods(sqlcipherErr == nil)
+		payload["sqlcipher_available"] = sqlcipherErr == nil
+		payload["sqlcipher_path"] = resolvedSQLCipher
+		payload["error"] = errString(sqlcipherErr)
 	case "desktop":
 		payload["explain"] = *explain
 		payload["once"] = *once
 		payload["requested"] = map[string]bool{"allow_process_inspect": *allowProcess, "allow_keychain": *allowKeychain, "store_keychain": *storeKeychain}
 		if strings.TrimSpace(*keysPath) == "" {
 			payload["available"] = false
-			payload["warning"] = "process inspection is deliberately not implemented; pass --keys with a reviewed key manifest to decrypt a copied snapshot"
+			payload["warning"] = "no key manifest supplied; native process inspection/keychain extraction is deliberately not implemented, so pass --keys with a reviewed key manifest to decrypt a copied snapshot"
 			break
 		}
 		if *explain {
@@ -838,6 +844,14 @@ func unlockVersionGate(appVersion string) map[string]any {
 		"requires_external_extractor":  true,
 		"supported_desktop_major_line": "4.1.x",
 	}
+}
+
+func availableUnlockMethods(sqlcipherAvailable bool) []string {
+	methods := []string{}
+	if sqlcipherAvailable {
+		methods = append(methods, "key-manifest+sqlcipher")
+	}
+	return methods
 }
 
 var keyScanSensitiveRE = regexp.MustCompile(`(?i)(?:0x|x')?[0-9a-f]{64}'?`)

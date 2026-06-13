@@ -489,6 +489,29 @@ func TestUnlockDesktopDoesNotClaimAvailability(t *testing.T) {
 	}
 }
 
+func TestUnlockStatusReportsManifestPath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	code, out, errOut := runForTest("--json", "unlock", "status")
+	if code != 0 {
+		t.Fatalf("unlock status code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fmt.Sprint(payload["next"]), "after an unlock method is implemented") {
+		t.Fatalf("unlock status has stale next step: %#v", payload)
+	}
+	if payload["version_gate"] == nil {
+		t.Fatalf("unlock status missing version gate: %#v", payload)
+	}
+	if _, ok := payload["available_methods"].([]any); !ok {
+		t.Fatalf("unlock status missing methods list: %#v", payload)
+	}
+}
+
 func TestUnlockDesktopExplainWithKeysIsDryRun(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))
