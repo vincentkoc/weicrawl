@@ -253,6 +253,8 @@ func (e env) runSync(args []string) error {
 	keepDecrypted := fs.Bool("keep-decrypted-snapshot", e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots, "keep decrypted snapshot")
 	decryptedDir := fs.String("decrypted-dir", "", "import a decrypted db_storage tree")
 	backupRoot := fs.String("backup-root", "", "user-selected WeChat backup root")
+	importPath := fs.String("import-path", "", "artifact path for source=import")
+	importFormat := fs.String("format", "jsonl", "import artifact format")
 	_ = fs.Bool("full", false, "full sync")
 	_ = fs.String("since", "", "lower bound timestamp")
 	_ = fs.Int("concurrency", 1, "copy concurrency")
@@ -265,7 +267,7 @@ func (e env) runSync(args []string) error {
 	if *mediaMode != "" && *mediaMode != "metadata" && *mediaMode != "copy" {
 		return output.UsageError{Err: fmt.Errorf("unsupported media mode %q", *mediaMode)}
 	}
-	if *source != "desktop-macos" && *source != "desktop-backup" && *source != "all" && *source != "official-account-api" {
+	if *source != "desktop-macos" && *source != "desktop-backup" && *source != "all" && *source != "official-account-api" && *source != "import" {
 		return output.UsageError{Err: fmt.Errorf("source %q is not implemented yet", *source)}
 	}
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
@@ -289,6 +291,15 @@ func (e env) runSync(args []string) error {
 			return err
 		}
 		return e.write("sync", result)
+	}
+	if *source == "import" {
+		if strings.TrimSpace(*importPath) == "" {
+			return output.UsageError{Err: errors.New("--import-path is required for source=import")}
+		}
+		if *importFormat != "jsonl" {
+			return output.UsageError{Err: fmt.Errorf("unsupported import format %q", *importFormat)}
+		}
+		return e.importJSONL(arc, config.Expand(*importPath))
 	}
 	if strings.TrimSpace(*decryptedDir) != "" {
 		profileID := *profileFlag

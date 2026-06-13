@@ -204,6 +204,17 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if hits := search["hits"].([]any); len(hits) < 2 {
 		t.Fatalf("jsonl search hits = %#v", hits)
 	}
+	syncImportDB := filepath.Join(root, "sync-imported.db")
+	code, out, errOut = runForTest("--json", "--db", syncImportDB, "sync", "--source", "import", "--import-path", jsonlPath)
+	if code != 0 {
+		t.Fatalf("sync import code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &imported); err != nil {
+		t.Fatal(err)
+	}
+	if imported["source"] != "import-jsonl" {
+		t.Fatalf("sync import payload=%#v", imported)
+	}
 
 	snapshotDir := filepath.Join(root, "snapshot")
 	code, out, errOut = runForTest("--json", "snapshot", "create", "--out", snapshotDir)

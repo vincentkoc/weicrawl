@@ -100,6 +100,7 @@ JSONL:
 go run ./cmd/weicrawl --json export --format jsonl --out exports/archive.jsonl
 go run ./cmd/weicrawl --json export --format jsonl --scope messages --out exports/messages.jsonl
 go run ./cmd/weicrawl --json import --format jsonl exports/archive.jsonl
+go run ./cmd/weicrawl --json sync --source import --import-path exports/archive.jsonl
 ```
 
 Markdown:
