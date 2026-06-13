@@ -542,6 +542,16 @@ func TestCLIUnlockDecryptThenSyncEncryptedFixture(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("unlock code=%d stderr=%s stdout=%s", code, errOut, out)
 	}
+	var unlockPayload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &unlockPayload); err != nil {
+		t.Fatal(err)
+	}
+	if unlockPayload["method"] != "key-manifest+sqlcipher" || unlockPayload["persisted"].(bool) {
+		t.Fatalf("unlock payload = %#v", unlockPayload)
+	}
+	if !strings.Contains(fmt.Sprint(unlockPayload["next"]), "--decrypted-dir") {
+		t.Fatalf("unlock next missing decrypted dir: %#v", unlockPayload)
+	}
 	code, out, errOut = runForTest("--json", "init")
 	if code != 0 {
 		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)

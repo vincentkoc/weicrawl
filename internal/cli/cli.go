@@ -532,7 +532,19 @@ func (e env) runUnlock(args []string) error {
 		if err != nil {
 			return err
 		}
-		return e.write("unlock", result)
+		nextProfile := strings.TrimSpace(*profile)
+		if nextProfile == "" {
+			nextProfile = "decrypted"
+		}
+		return e.write("unlock", map[string]any{
+			"subcommand":  sub,
+			"method":      "key-manifest+sqlcipher",
+			"app_version": disc.AppVersion,
+			"profile":     *profile,
+			"persisted":   false,
+			"decrypt":     result,
+			"next":        fmt.Sprintf("run `weicrawl sync --source desktop-macos --profile %s --decrypted-dir %s`", nextProfile, result.OutputDir),
+		})
 	case "scan-keys":
 		plan, err := unlock.BuildKeyScanPlan(*allowProcess, *execute, config.Expand(*script), config.Expand(*outputPath))
 		if err != nil {
