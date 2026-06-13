@@ -40,11 +40,12 @@ type Discovery struct {
 }
 
 type Profile struct {
-	ProfileID string   `json:"profile_id"`
-	Wxid      string   `json:"wxid,omitempty"`
-	Root      string   `json:"root"`
-	Databases []DBFile `json:"databases,omitempty"`
-	MediaDirs []string `json:"media_dirs,omitempty"`
+	ProfileID        string   `json:"profile_id"`
+	Wxid             string   `json:"wxid,omitempty"`
+	Root             string   `json:"root"`
+	Databases        []DBFile `json:"databases,omitempty"`
+	KeyInfoDatabases []DBFile `json:"key_info_databases,omitempty"`
+	MediaDirs        []string `json:"media_dirs,omitempty"`
 }
 
 type DBFile struct {
@@ -120,6 +121,7 @@ func Discover(ctx context.Context, containerPath string) Discovery {
 			Root:      profileRoot,
 		}
 		profile.Databases = findDatabases(profileRoot)
+		profile.KeyInfoDatabases = matchingKeyInfoDatabases(out.KeyInfoDatabases, profile.Wxid)
 		profile.MediaDirs = findMediaDirs(profileRoot)
 		out.DatabaseCount += len(profile.Databases)
 		for _, db := range profile.Databases {
@@ -133,6 +135,19 @@ func Discover(ctx context.Context, containerPath string) Discovery {
 	sort.Slice(out.ProfileRoots, func(i, j int) bool {
 		return out.ProfileRoots[i].ProfileID < out.ProfileRoots[j].ProfileID
 	})
+	return out
+}
+
+func matchingKeyInfoDatabases(all []DBFile, wxid string) []DBFile {
+	if strings.TrimSpace(wxid) == "" {
+		return nil
+	}
+	var out []DBFile
+	for _, db := range all {
+		if filepath.Base(filepath.Dir(db.Path)) == wxid {
+			out = append(out, db)
+		}
+	}
 	return out
 }
 

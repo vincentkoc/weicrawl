@@ -45,6 +45,13 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if err := os.WriteFile(mediaPath, []byte("sample media"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	keyInfoDB := filepath.Join(container, "Data", "Documents", "xwechat_files", "all_users", "login", "wxid_fixture", "key_info.db")
+	if err := os.MkdirAll(filepath.Dir(keyInfoDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyInfoDB, append([]byte("SQLite format 3\x00"), []byte("key-info")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	dbPath := filepath.Join(configRoot, "weicrawl", "weicrawl.db")
 	code, out, errOut := runForTest("--json", "init")
@@ -84,7 +91,7 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if check := doctorCheck(t, doctor, "source_db_encryption_probe"); int(check["encrypted_count"].(float64)) != 0 {
 		t.Fatalf("encryption check = %#v", check)
 	}
-	if check := doctorCheck(t, doctor, "key_info_discovery"); int(check["key_info_db_count"].(float64)) != 0 {
+	if check := doctorCheck(t, doctor, "key_info_discovery"); int(check["key_info_db_count"].(float64)) != 1 {
 		t.Fatalf("key info check = %#v", check)
 	}
 
@@ -143,6 +150,9 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(sync["concurrency"].(float64)); got != 2 {
 		t.Fatalf("sync concurrency = %d, payload=%#v", got, sync)
 	}
+	if got := int(sync["key_info_db_count"].(float64)); got != 1 {
+		t.Fatalf("sync key_info_db_count = %d, payload=%#v", got, sync)
+	}
 	mediaSnapshot := fmt.Sprint(sync["snapshot_path"])
 	if mediaSnapshot == "" {
 		t.Fatalf("media copy snapshot missing: %#v", sync)
@@ -150,6 +160,10 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	copiedMedia := filepath.Join(mediaSnapshot, "media", "msg", "file", "2026-06", "sample.txt")
 	if bytes, err := os.ReadFile(copiedMedia); err != nil || string(bytes) != "sample media" {
 		t.Fatalf("copied media = %q err=%v", string(bytes), err)
+	}
+	copiedKeyInfo := filepath.Join(mediaSnapshot, "key_info", "wxid_fixture", "key_info.db")
+	if bytes, err := os.ReadFile(copiedKeyInfo); err != nil || !strings.Contains(string(bytes), "key-info") {
+		t.Fatalf("copied key info = %q err=%v", string(bytes), err)
 	}
 	code, out, errOut = runForTest("--json", "media")
 	if code != 0 {
@@ -234,7 +248,7 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(sourceStatus["database_count"].(float64)); got != 1 {
 		t.Fatalf("source database_count = %d, source=%#v", got, sourceStatus)
 	}
-	if got := int(sourceStatus["key_info_db_count"].(float64)); got != 0 {
+	if got := int(sourceStatus["key_info_db_count"].(float64)); got != 1 {
 		t.Fatalf("source key_info_db_count = %d, source=%#v", got, sourceStatus)
 	}
 	if _, ok := sourceStatus["app_version"]; !ok {

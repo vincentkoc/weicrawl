@@ -36,6 +36,7 @@ type Snapshot struct {
 	Wxid               string            `json:"wxid,omitempty"`
 	AppVersion         string            `json:"app_version,omitempty"`
 	DatabaseFiles      []SnapshotFile    `json:"database_files"`
+	KeyInfoFiles       []SnapshotFile    `json:"key_info_files,omitempty"`
 	MediaDirs          []string          `json:"media_dirs,omitempty"`
 	SourceFingerprints map[string]string `json:"source_fingerprints,omitempty"`
 }
@@ -58,6 +59,7 @@ type SyncResult struct {
 	SnapshotPath        string   `json:"snapshot_path,omitempty"`
 	DecryptedSnapshot   string   `json:"decrypted_snapshot_path,omitempty"`
 	SourceDBCount       int      `json:"source_db_count"`
+	KeyInfoDBCount      int      `json:"key_info_db_count,omitempty"`
 	ImportedProfiles    int64    `json:"imported_profiles"`
 	ImportedContacts    int64    `json:"imported_contacts"`
 	ImportedChats       int64    `json:"imported_chats"`
@@ -125,6 +127,31 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 			}
 		}
 	}
+	for _, db := range opts.Profile.KeyInfoDatabases {
+		loginID := filepath.Base(filepath.Dir(db.Path))
+		if strings.TrimSpace(loginID) == "" || loginID == "." || loginID == string(filepath.Separator) {
+			loginID = "unknown"
+		}
+		rel := filepath.Join(loginID, filepath.Base(db.Path))
+		dst := filepath.Join(root, "key_info", rel)
+		if err := copyFile(dst, db.Path); err != nil {
+			return snap, fmt.Errorf("copy key info db %s: %w", db.Path, err)
+		}
+		hash, _ := fileSHA256(dst)
+		snap.SourceFingerprints[filepath.Join("key_info", rel)] = hash
+		info, _ := os.Stat(dst)
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+		snap.KeyInfoFiles = append(snap.KeyInfoFiles, SnapshotFile{Source: db.Path, Path: dst, Role: db.Role, Size: size, SHA256: hash})
+		for _, sidecar := range db.Sidecars {
+			sideRel := rel + strings.TrimPrefix(sidecar, db.Path)
+			if err := copyFile(filepath.Join(root, "key_info", sideRel), sidecar); err != nil {
+				return snap, fmt.Errorf("copy key info sidecar %s: %w", sidecar, err)
+			}
+		}
+	}
 	if opts.IncludeMedia {
 		mediaRoot := filepath.Join(root, "media")
 		for _, dir := range opts.Profile.MediaDirs {
@@ -160,6 +187,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 		result.ProfileID = snap.ProfileID
 		result.SnapshotPath = snap.Root
 		result.SourceDBCount = len(snap.DatabaseFiles)
+		result.KeyInfoDBCount = len(snap.KeyInfoFiles)
 	}
 	if err != nil {
 		if result.RunID == "" {

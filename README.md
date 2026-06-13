@@ -203,8 +203,10 @@ WEICRAWL_LIVE_SNAPSHOT=/path/to/copied/profile \
 
 `live-copy-snapshot.sh` uses a temp archive and cache, discovers the local
 macOS WeChat container from the current `HOME`, copies DB/WAL/SHM sidecars into
-a retained snapshot, and prints the copied `snapshot_path`. If `WEICRAWL_LIVE_KEYS`
-is already set, it chains into `e2e-local.sh` with that copied snapshot.
+a retained snapshot, copies matching `all_users/login/<wxid>/key_info.db`
+metadata under `key_info/`, and prints the copied `snapshot_path`. If
+`WEICRAWL_LIVE_KEYS` is already set, it chains into `e2e-local.sh` with that
+copied snapshot.
 
 Tests use temp homes and synthetic SQLite fixtures only. They must not read or
 mutate the operator's live WeChat container.

@@ -48,6 +48,7 @@ summary = {
     "status": sync.get("status"),
     "snapshot_path": snapshot,
     "source_db_count": sync.get("source_db_count"),
+    "snapshot_key_info_db_count": sync.get("key_info_db_count"),
     "encrypted_db_count": desktop.get("encrypted_db_count"),
     "key_info_db_count": desktop.get("key_info_db_count"),
     "imported_messages": sync.get("imported_messages"),

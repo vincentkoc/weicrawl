@@ -57,6 +57,9 @@ func TestDiscoverFindsProfilesDatabasesAndMediaDirs(t *testing.T) {
 	if len(profile.MediaDirs) != 1 {
 		t.Fatalf("media dirs = %#v", profile.MediaDirs)
 	}
+	if len(profile.KeyInfoDatabases) != 1 || profile.KeyInfoDatabases[0].Role != "key_info" {
+		t.Fatalf("profile key info dbs = %#v", profile.KeyInfoDatabases)
+	}
 	if len(disc.BackupDirs) != 1 {
 		t.Fatalf("backup dirs = %#v", disc.BackupDirs)
 	}
