@@ -369,9 +369,32 @@ func (e env) runStatus() error {
 		ckStatus.LastSyncAt = status.LastSyncRun.FinishedAt
 	}
 	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
+	statusWarnings := append([]string{}, disc.Warnings...)
+	if disc.EncryptedDBCount > 0 && status.MessageCount == 0 {
+		statusWarnings = append(statusWarnings, "desktop databases appear encrypted and no messages are imported; run sync with --keep-source-snapshot, then unlock with an explicit key manifest")
+	}
+	if e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots {
+		statusWarnings = append(statusWarnings, "decrypted snapshot retention is enabled; decrypted source DB copies may remain on disk")
+	}
+	ckStatus.Warnings = statusWarnings
+	retention := map[string]any{
+		"snapshot_mode":            e.loaded.Config.DesktopMacOS.SnapshotMode,
+		"media_mode":               e.loaded.Config.DesktopMacOS.MediaMode,
+		"keep_source_snapshots":    e.loaded.Config.DesktopMacOS.KeepSourceSnapshots,
+		"keep_decrypted_snapshots": e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots,
+	}
+	unlockPosture := map[string]any{
+		"key_manifest_supported": true,
+		"native_process_inspect": false,
+		"native_keychain":        false,
+		"key_info_db_count":      disc.KeyInfoDBCount,
+	}
 	return e.write("status", map[string]any{
-		"control": ckStatus,
-		"archive": status,
+		"control":   ckStatus,
+		"archive":   status,
+		"retention": retention,
+		"unlock":    unlockPosture,
+		"warnings":  statusWarnings,
 		"source": map[string]any{
 			"desktop_macos": map[string]any{
 				"app_path":                 disc.AppPath,

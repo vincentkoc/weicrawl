@@ -197,6 +197,21 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(archiveStatus["moment_count"].(float64)); got != 1 {
 		t.Fatalf("moment_count = %d, status=%#v", got, archiveStatus)
 	}
+	retentionStatus := status["retention"].(map[string]any)
+	if retentionStatus["keep_decrypted_snapshots"].(bool) || retentionStatus["snapshot_mode"] != "copy" {
+		t.Fatalf("status retention = %#v", retentionStatus)
+	}
+	unlockStatus := status["unlock"].(map[string]any)
+	if !unlockStatus["key_manifest_supported"].(bool) || unlockStatus["native_process_inspect"].(bool) || unlockStatus["native_keychain"].(bool) {
+		t.Fatalf("status unlock = %#v", unlockStatus)
+	}
+	if warnings := status["warnings"].([]any); len(warnings) != 0 {
+		t.Fatalf("status warnings = %#v", warnings)
+	}
+	controlStatus := status["control"].(map[string]any)
+	if warnings := controlStatus["warnings"]; warnings != nil {
+		t.Fatalf("control warnings = %#v", warnings)
+	}
 	lastRun := archiveStatus["last_sync_run"].(map[string]any)
 	if got := int(lastRun["imported_message_parts"].(float64)); got != 1 {
 		t.Fatalf("last run imported_message_parts = %d, run=%#v", got, lastRun)
@@ -947,6 +962,21 @@ func TestCLISyncDesktopMarksEncryptedLikeDBPartial(t *testing.T) {
 	}
 	if !strings.Contains(fmt.Sprint(payload["warnings"]), "encrypted or unsupported") {
 		t.Fatalf("warnings = %#v", payload["warnings"])
+	}
+	code, out, errOut = runForTest("--json", "status")
+	if code != 0 {
+		t.Fatalf("status after encrypted sync code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var status map[string]any
+	if err := json.Unmarshal(out.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fmt.Sprint(status["warnings"]), "unlock with an explicit key manifest") {
+		t.Fatalf("encrypted status warnings = %#v", status["warnings"])
+	}
+	controlWarnings := status["control"].(map[string]any)["warnings"]
+	if !strings.Contains(fmt.Sprint(controlWarnings), "unlock with an explicit key manifest") {
+		t.Fatalf("encrypted control warnings = %#v", controlWarnings)
 	}
 }
 
