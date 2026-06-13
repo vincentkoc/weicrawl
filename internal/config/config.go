@@ -42,6 +42,7 @@ type UnlockConfig struct {
 
 type OfficialAccountConfig struct {
 	Enabled      bool   `toml:"enabled" json:"enabled"`
+	BaseURL      string `toml:"base_url" json:"base_url,omitempty"`
 	AppIDEnv     string `toml:"app_id_env" json:"app_id_env"`
 	AppSecretEnv string `toml:"app_secret_env" json:"app_secret_env"`
 }
@@ -159,6 +160,9 @@ func applyEnv(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("WEICRAWL_CACHE_DIR")); value != "" {
 		cfg.Archive.CacheDir = value
 	}
+	if value := strings.TrimSpace(os.Getenv("WEICRAWL_WECHAT_API_BASE_URL")); value != "" {
+		cfg.OfficialAccount.BaseURL = value
+	}
 }
 
 func expandConfig(cfg *Config) {
@@ -178,4 +182,5 @@ func expandConfig(cfg *Config) {
 	if strings.TrimSpace(cfg.OfficialAccount.AppSecretEnv) == "" {
 		cfg.OfficialAccount.AppSecretEnv = "WEICRAWL_WECHAT_APP_SECRET"
 	}
+	cfg.OfficialAccount.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.OfficialAccount.BaseURL), "/")
 }

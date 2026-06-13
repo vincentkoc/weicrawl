@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -730,6 +732,62 @@ func TestOfficialAccountSyncSkipsWithoutCredentials(t *testing.T) {
 	}
 	if payload["status"] != "skipped" {
 		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestOfficialAccountSyncUsesConfiguredBaseURL(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("WEICRAWL_WECHAT_APP_ID", "app")
+	t.Setenv("WEICRAWL_WECHAT_APP_SECRET", "secret")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			if r.URL.Query().Get("appid") != "app" || r.URL.Query().Get("secret") != "secret" {
+				t.Fatalf("token query = %q", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"token-value","expires_in":7200}`))
+		case "/cgi-bin/material/batchget_material":
+			if r.URL.Query().Get("access_token") != "token-value" {
+				t.Fatalf("material query = %q", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"total_count":1,"item_count":1,"item":[{"media_id":"media-1","update_time":1781323200,"content":{"news_item":[{"title":"Official e2e","digest":"Fixture post","url":"https://example.invalid/official"}]}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("WEICRAWL_WECHAT_API_BASE_URL", server.URL)
+
+	code, out, errOut := runForTest("--json", "init")
+	if code != 0 {
+		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	code, out, errOut = runForTest("--json", "sync", "--source", "official-account-api")
+	if code != 0 {
+		t.Fatalf("sync code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["status"] != "success" || int(payload["articles"].(float64)) != 1 || !payload["token_cache_safe"].(bool) {
+		t.Fatalf("payload = %#v", payload)
+	}
+	code, out, errOut = runForTest("--json", "search", "Official e2e")
+	if code != 0 {
+		t.Fatalf("search code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var search map[string]any
+	if err := json.Unmarshal(out.Bytes(), &search); err != nil {
+		t.Fatal(err)
+	}
+	if hits := search["hits"].([]any); len(hits) != 1 || hits[0].(map[string]any)["entity"] != "article" {
+		t.Fatalf("search hits = %#v", hits)
 	}
 }
 

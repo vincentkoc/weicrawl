@@ -14,6 +14,10 @@ git diff --check
 echo "== live-safe cli smoke =="
 tmpdir="$(mktemp -d)"
 cleanup() {
+  if [[ -n "${official_server_pid:-}" ]]; then
+    kill "$official_server_pid" 2>/dev/null || true
+    wait "$official_server_pid" 2>/dev/null || true
+  fi
   rm -rf "$tmpdir"
 }
 trap cleanup EXIT
@@ -82,6 +86,76 @@ conn.commit()
 conn.close()
 PY
 
+cat > "$tmpdir/official_api.py" <<'PY'
+import http.server
+import json
+import pathlib
+import socketserver
+import sys
+import urllib.parse
+
+ready = pathlib.Path(sys.argv[1])
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        return
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        query = urllib.parse.parse_qs(parsed.query)
+        if parsed.path != "/cgi-bin/token":
+            self.send_error(404)
+            return
+        if query.get("appid") != ["official-app"] or query.get("secret") != ["official-secret"]:
+            self.send_error(403)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"access_token": "official-token", "expires_in": 7200}).encode())
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        query = urllib.parse.parse_qs(parsed.query)
+        if parsed.path != "/cgi-bin/material/batchget_material":
+            self.send_error(404)
+            return
+        if query.get("access_token") != ["official-token"]:
+            self.send_error(403)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({
+            "total_count": 1,
+            "item_count": 1,
+            "item": [{
+                "media_id": "official-media-1",
+                "update_time": 1781323200,
+                "content": {"news_item": [{
+                    "title": "Official account e2e",
+                    "digest": "Synthetic official account post",
+                    "url": "https://example.invalid/official-e2e"
+                }]}
+            }]
+        }).encode())
+
+with socketserver.TCPServer(("127.0.0.1", 0), Handler) as httpd:
+    ready.write_text(f"http://127.0.0.1:{httpd.server_address[1]}\n")
+    httpd.serve_forever()
+PY
+python3 "$tmpdir/official_api.py" "$tmpdir/official-api-url" &
+official_server_pid=$!
+for _ in $(seq 1 50); do
+  [[ -s "$tmpdir/official-api-url" ]] && break
+  sleep 0.1
+done
+if [[ ! -s "$tmpdir/official-api-url" ]]; then
+  echo "official-account fake API did not start" >&2
+  exit 1
+fi
+official_base_url="$(cat "$tmpdir/official-api-url")"
+
 "$weicrawl" --json init > "$tmpdir/init.json"
 "$weicrawl" --json version > "$tmpdir/version.json"
 "$weicrawl" --json metadata > "$tmpdir/metadata.json"
@@ -91,7 +165,12 @@ env -u WEICRAWL_WECHAT_APP_ID -u WEICRAWL_WECHAT_APP_SECRET \
 "$weicrawl" --json status > "$tmpdir/status.json"
 "$weicrawl" --json unlock status > "$tmpdir/unlock-status.json"
 "$weicrawl" --json unlock scan-keys --allow-process-inspect > "$tmpdir/scan-plan.json"
+env WEICRAWL_WECHAT_APP_ID=official-app \
+  WEICRAWL_WECHAT_APP_SECRET=official-secret \
+  WEICRAWL_WECHAT_API_BASE_URL="$official_base_url" \
+  "$weicrawl" --json sync --source official-account-api > "$tmpdir/official-sync.json"
 "$weicrawl" --json search "e2e fixture" > "$tmpdir/search.json"
+"$weicrawl" --json search "Official account e2e" > "$tmpdir/search-official.json"
 "$weicrawl" --json export --format jsonl --out "$tmpdir/archive.jsonl" > "$tmpdir/export-jsonl.json"
 "$weicrawl" --json export --format markdown --out "$tmpdir/markdown" > "$tmpdir/export-markdown.json"
 "$weicrawl" --json --db "$tmpdir/jsonl-import.db" init > "$tmpdir/jsonl-import-init.json"
@@ -138,7 +217,13 @@ status = payloads["status"]
 if status.get("control", {}).get("state") != "ok":
     raise SystemExit(f"status not ok: {status}")
 
-for name in ("search", "search-jsonl-import", "search-snapshot-import"):
+official = payloads["official-sync"]
+if official.get("status") != "success" or official.get("articles") != 1 or not official.get("token_cache_safe"):
+    raise SystemExit(f"official-account sync failed contract: {official}")
+if official.get("rate_limited") or official.get("raw_token_persisted"):
+    raise SystemExit(f"official-account sync unsafe posture: {official}")
+
+for name in ("search", "search-official", "search-jsonl-import", "search-snapshot-import"):
     hits = payloads[name].get("hits", [])
     if not hits:
         raise SystemExit(f"{name} returned no hits: {payloads[name]}")
@@ -169,6 +254,7 @@ print(json.dumps({
     "roundtrip": {
         "jsonl_rows": payloads["import-jsonl"].get("rows"),
         "search_hits": len(payloads["search"].get("hits", [])),
+        "official_search_hits": len(payloads["search-official"].get("hits", [])),
         "jsonl_import_hits": len(payloads["search-jsonl-import"].get("hits", [])),
         "snapshot_import_hits": len(payloads["search-snapshot-import"].get("hits", [])),
     },

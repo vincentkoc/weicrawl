@@ -646,7 +646,10 @@ func syncStatus(value any) string {
 }
 
 func (e env) syncOfficial(arc *archive.Archive) (officialaccount.Result, error) {
-	return officialaccount.Sync(e.ctx, arc, officialaccount.Options{Config: e.loaded.Config.OfficialAccount})
+	return officialaccount.Sync(e.ctx, arc, officialaccount.Options{
+		Config:  e.loaded.Config.OfficialAccount,
+		BaseURL: e.loaded.Config.OfficialAccount.BaseURL,
+	})
 }
 
 func (e env) syncBackup(arc *archive.Archive, opts syncOptions) (backup.Result, error) {

@@ -715,6 +715,7 @@ store_keychain = false
 
 [official_account]
 enabled = false
+base_url = ""
 app_id_env = "WEICRAWL_WECHAT_APP_ID"
 app_secret_env = "WEICRAWL_WECHAT_APP_SECRET"
 ```
@@ -726,6 +727,7 @@ Primary environment variables:
 - `WEICRAWL_CACHE_DIR`
 - `WEICRAWL_WECHAT_APP_ID`
 - `WEICRAWL_WECHAT_APP_SECRET`
+- `WEICRAWL_WECHAT_API_BASE_URL`
 - `WEICRAWL_NO_UPDATE_CHECK`
 - `CRAWLKIT_NO_UPDATE_CHECK`
 

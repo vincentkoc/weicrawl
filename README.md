@@ -76,6 +76,8 @@ Official-account sync fetches an access token in memory for the current run,
 then records only non-secret expiration/cache posture metadata in `sync_state`.
 The raw access token is not persisted in the archive, JSON output, snapshots,
 fixtures, or logs.
+For local tests or controlled gateways, set `official_account.base_url` or
+`WEICRAWL_WECHAT_API_BASE_URL`; production defaults to the Weixin API host.
 
 Backup or migration directories are only read when selected explicitly:
 
