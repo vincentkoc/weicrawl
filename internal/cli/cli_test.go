@@ -1355,6 +1355,44 @@ printf "wrapped key: x'%064d'\n" 1
 	}
 }
 
+func TestCLIKeyScanExecuteKeepsExtractorManifest(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "scanner")
+	manifestPath := filepath.Join(root, "wechat_keys.json")
+	perDBKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	stdoutKey := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+cat > "$1" <<'JSON'
+{"keys":{"message/message_0.db":"`+perDBKey+`"}}
+JSON
+printf 'db key: `+stdoutKey+`\n'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(root, "wrapper")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec "+script+" "+manifestPath+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runForTest("--json", "unlock", "scan-keys", "--allow-process-inspect", "--execute", "--script", wrapper, "--scan-out", manifestPath)
+	if code != 0 {
+		t.Fatalf("scan execute code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["manifest_written"].(bool) {
+		t.Fatalf("expected extractor manifest reuse: %#v", payload)
+	}
+	bytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bytes), stdoutKey) || !strings.Contains(string(bytes), perDBKey) {
+		t.Fatalf("manifest = %s", bytes)
+	}
+}
+
 func runForTest(args ...string) (int, *bytes.Buffer, *bytes.Buffer) {
 	var stdout, stderr bytes.Buffer
 	code := Main(args, &stdout, &stderr)

@@ -110,6 +110,9 @@ func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, er
 	if strings.TrimSpace(outputPath) == "" {
 		outputPath = "wechat_keys.json"
 	}
+	if _, err := ReadKeyManifest(outputPath); err == nil {
+		return false, nil
+	}
 	match := scanKeyRE.FindSubmatch(output)
 	if len(match) >= 2 {
 		key, err := normalizeManifestKey("__default_key", string(match[1]))
@@ -130,9 +133,6 @@ func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, er
 			return false, fmt.Errorf("write key manifest: %w", err)
 		}
 		return true, nil
-	}
-	if _, err := ReadKeyManifest(outputPath); err == nil {
-		return false, nil
 	}
 	return false, errors.New("key scan output did not include a 64-hex key and no valid manifest was written")
 }

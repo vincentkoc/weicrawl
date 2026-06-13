@@ -118,6 +118,31 @@ func TestWriteDefaultKeyManifestFromScanAcceptsExistingManifest(t *testing.T) {
 	}
 }
 
+func TestWriteDefaultKeyManifestFromScanDoesNotOverwriteExistingManifest(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "wechat_keys.json")
+	perDBKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	stdoutKey := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	original := `{"keys":{"message/message_0.db":"` + perDBKey + `"}}`
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	written, err := WriteDefaultKeyManifestFromScan([]byte("db key: "+stdoutKey), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written {
+		t.Fatal("expected existing manifest to be reused")
+	}
+	manifest, err := ReadKeyManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.DefaultKey != "" || manifest.Keys["message/message_0.db"] != perDBKey {
+		t.Fatalf("manifest was overwritten: %#v", manifest)
+	}
+}
+
 func TestBuildKeyScanPlanUsesPythonOnlyForPythonScripts(t *testing.T) {
 	plan, err := BuildKeyScanPlan(true, false, "/tmp/find_key_memscan.py", "keys.json")
 	if err != nil {
