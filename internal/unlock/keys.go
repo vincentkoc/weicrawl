@@ -14,6 +14,7 @@ import (
 )
 
 var hexKeyRE = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+var scanKeyRE = regexp.MustCompile(`(?i)(?:0x|x')?([0-9a-f]{64})'?`)
 
 type KeyManifest struct {
 	Keys       map[string]string `json:"keys"`
@@ -53,10 +54,11 @@ type KeyReadiness struct {
 }
 
 type KeyScanPlan struct {
-	Allowed bool     `json:"allowed"`
-	Execute bool     `json:"execute"`
-	Command []string `json:"command"`
-	Notes   []string `json:"notes,omitempty"`
+	Allowed    bool     `json:"allowed"`
+	Execute    bool     `json:"execute"`
+	Command    []string `json:"command"`
+	OutputPath string   `json:"output_path"`
+	Notes      []string `json:"notes,omitempty"`
 }
 
 func BuildKeyScanPlan(allowProcessInspect, execute bool, scriptPath, outputPath string) (KeyScanPlan, error) {
@@ -79,6 +81,7 @@ func BuildKeyScanPlan(allowProcessInspect, execute bool, scriptPath, outputPath 
 		outputPath = "wechat_keys.json"
 	}
 	plan.Command = []string{"python3", scriptPath}
+	plan.OutputPath = outputPath
 	plan.Notes = append(plan.Notes, "run from the key extractor directory or pass --script")
 	plan.Notes = append(plan.Notes, "expected output: "+outputPath)
 	return plan, nil
@@ -94,6 +97,37 @@ func ExecuteKeyScan(ctx context.Context, plan KeyScanPlan) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, plan.Command[0], plan.Command[1:]...)
 	cmd.Env = os.Environ()
 	return cmd.CombinedOutput()
+}
+
+func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, error) {
+	if strings.TrimSpace(outputPath) == "" {
+		outputPath = "wechat_keys.json"
+	}
+	match := scanKeyRE.FindSubmatch(output)
+	if len(match) >= 2 {
+		key, err := normalizeManifestKey("__default_key", string(match[1]))
+		if err != nil {
+			return false, err
+		}
+		if dir := filepath.Dir(outputPath); dir != "." {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return false, err
+			}
+		}
+		bytes, err := json.MarshalIndent(map[string]string{"__default_key": key}, "", "  ")
+		if err != nil {
+			return false, err
+		}
+		bytes = append(bytes, '\n')
+		if err := os.WriteFile(outputPath, bytes, 0o600); err != nil {
+			return false, fmt.Errorf("write key manifest: %w", err)
+		}
+		return true, nil
+	}
+	if _, err := ReadKeyManifest(outputPath); err == nil {
+		return false, nil
+	}
+	return false, errors.New("key scan output did not include a 64-hex key and no valid manifest was written")
 }
 
 func ReadKeyManifest(path string) (KeyManifest, error) {

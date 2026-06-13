@@ -75,6 +75,49 @@ func TestReadKeyManifestRejectsBadKeys(t *testing.T) {
 	}
 }
 
+func TestWriteDefaultKeyManifestFromScan(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "wechat_keys.json")
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	written, err := WriteDefaultKeyManifestFromScan([]byte("db key: 0x"+key), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !written {
+		t.Fatal("expected manifest write")
+	}
+	manifest, err := ReadKeyManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.DefaultKey != key {
+		t.Fatalf("default key = %q", manifest.DefaultKey)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("manifest mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestWriteDefaultKeyManifestFromScanAcceptsExistingManifest(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "wechat_keys.json")
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := os.WriteFile(path, []byte(`{"__default_key":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	written, err := WriteDefaultKeyManifestFromScan([]byte("manifest already written"), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written {
+		t.Fatal("expected existing manifest to be reused")
+	}
+}
+
 func TestDecryptSnapshotWithSQLCipherFixture(t *testing.T) {
 	sqlcipher, err := FindSQLCipher("")
 	if err != nil {

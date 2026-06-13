@@ -90,7 +90,9 @@ brew install sqlcipher
 
 go run ./cmd/weicrawl --json unlock scan-keys \
   --allow-process-inspect \
-  --script /path/to/find_key_memscan.py
+  --execute \
+  --script /path/to/find_key_memscan.py \
+  --scan-out ./wechat_keys.json
 
 go run ./cmd/weicrawl --json sync \
   --source desktop-macos \

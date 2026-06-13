@@ -706,11 +706,17 @@ func (e env) runUnlock(args []string) error {
 			return fmt.Errorf("key scan failed: %w\n%s", err, outputText)
 		}
 		outputText, redacted := redactKeyScanOutput(out)
+		written, err := unlock.WriteDefaultKeyManifestFromScan(out, plan.OutputPath)
+		if err != nil {
+			return fmt.Errorf("key scan manifest failed: %w\n%s", err, outputText)
+		}
 		return e.write("unlock", map[string]any{
-			"command":         plan.Command,
-			"output_redacted": outputText,
-			"output_bytes":    len(out),
-			"redacted":        redacted,
+			"command":          plan.Command,
+			"manifest_path":    plan.OutputPath,
+			"manifest_written": written,
+			"output_redacted":  outputText,
+			"output_bytes":     len(out),
+			"redacted":         redacted,
 		})
 	case "forget":
 		payload["forgotten"] = false

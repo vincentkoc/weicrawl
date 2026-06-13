@@ -593,6 +593,11 @@ Default-key expansion is limited to `.db` files under the copied snapshot's
 `db_storage` tree. Manifest database paths must be relative and must not escape
 the decrypted output root.
 
+`unlock scan-keys --execute --scan-out <path>` should convert a 64-hex key from
+the reviewed extractor's output into a `__default_key` manifest at `<path>`,
+write it with private file permissions, and return only redacted scanner output.
+If the extractor writes a valid manifest itself, the command may reuse it.
+
 Output must include:
 
 - unlock method selected

@@ -1210,12 +1210,13 @@ func TestCLIKeyScanRequiresExplicitProcessInspect(t *testing.T) {
 func TestCLIKeyScanExecuteRedactsKeyMaterial(t *testing.T) {
 	root := t.TempDir()
 	script := filepath.Join(root, "scanner.py")
+	manifestPath := filepath.Join(root, "wechat_keys.json")
 	if err := os.WriteFile(script, []byte(`print("db key: " + "a"*64)
 print("wrapped key: x'" + "b"*64 + "'")
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	code, out, errOut := runForTest("--json", "unlock", "scan-keys", "--allow-process-inspect", "--execute", "--script", script)
+	code, out, errOut := runForTest("--json", "unlock", "scan-keys", "--allow-process-inspect", "--execute", "--script", script, "--scan-out", manifestPath)
 	if code != 0 {
 		t.Fatalf("scan execute code=%d stderr=%s stdout=%s", code, errOut, out)
 	}
@@ -1229,8 +1230,18 @@ print("wrapped key: x'" + "b"*64 + "'")
 	if !payload["redacted"].(bool) {
 		t.Fatalf("payload did not mark redaction: %#v", payload)
 	}
+	if !payload["manifest_written"].(bool) || fmt.Sprint(payload["manifest_path"]) != manifestPath {
+		t.Fatalf("manifest fields missing: %#v", payload)
+	}
 	if !strings.Contains(fmt.Sprint(payload["output_redacted"]), "[redacted-key]") {
 		t.Fatalf("payload = %#v", payload)
+	}
+	bytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(bytes), `"__default_key"`) || !strings.Contains(string(bytes), strings.Repeat("a", 64)) {
+		t.Fatalf("manifest = %s", bytes)
 	}
 }
 
