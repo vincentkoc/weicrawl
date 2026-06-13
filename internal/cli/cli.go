@@ -1303,11 +1303,42 @@ func manifest() control.Manifest {
 	m.Privacy = control.Privacy{
 		ContainsPrivateMessages: true,
 		ExportsSecrets:          false,
-		LocalOnlyScopes:         []string{"desktop-macos", "desktop-backup"},
+		LocalOnlyScopes:         []string{"desktop-macos", "desktop-backup", "decrypted-dir", "import"},
 	}
-	m.Capabilities = []string{"local-sqlite", "desktop-snapshot", "fts-search", "snapshot-export", "tui"}
-	for _, cmd := range []string{"doctor", "status", "sync", "search", "tui"} {
-		m.Commands[cmd] = control.Command{Title: strings.Title(cmd), Argv: []string{"weicrawl", "--json", cmd}, JSON: true, Mutates: cmd == "sync"}
+	m.Capabilities = []string{
+		"local-sqlite",
+		"desktop-snapshot",
+		"desktop-backup",
+		"decrypted-db-import",
+		"fts-search",
+		"jsonl-import",
+		"jsonl-export",
+		"markdown-export",
+		"snapshot-export",
+		"tui",
+		"official-account-api",
+	}
+	for _, cmd := range []control.Command{
+		{Title: "Doctor", Argv: []string{"weicrawl", "--json", "doctor"}, JSON: true},
+		{Title: "Status", Argv: []string{"weicrawl", "--json", "status"}, JSON: true},
+		{Title: "Sync", Argv: []string{"weicrawl", "--json", "sync", "--source", "all"}, JSON: true, Mutates: true},
+		{Title: "Search", Argv: []string{"weicrawl", "--json", "search"}, JSON: true},
+		{Title: "TUI", Argv: []string{"weicrawl", "--json", "tui"}, JSON: true},
+		{Title: "Profiles", Argv: []string{"weicrawl", "--json", "profiles"}, JSON: true},
+		{Title: "Contacts", Argv: []string{"weicrawl", "--json", "contacts"}, JSON: true},
+		{Title: "Chats", Argv: []string{"weicrawl", "--json", "chats"}, JSON: true},
+		{Title: "Messages", Argv: []string{"weicrawl", "--json", "messages"}, JSON: true},
+		{Title: "Favorites", Argv: []string{"weicrawl", "--json", "favorites"}, JSON: true},
+		{Title: "Articles", Argv: []string{"weicrawl", "--json", "articles"}, JSON: true},
+		{Title: "Media", Argv: []string{"weicrawl", "--json", "media"}, JSON: true},
+		{Title: "Runs", Argv: []string{"weicrawl", "--json", "runs"}, JSON: true},
+		{Title: "Metadata", Argv: []string{"weicrawl", "--json", "metadata"}, JSON: true},
+	} {
+		name := cmd.Argv[len(cmd.Argv)-1]
+		if name == "all" {
+			name = "sync"
+		}
+		m.Commands[name] = cmd
 	}
 	return m
 }

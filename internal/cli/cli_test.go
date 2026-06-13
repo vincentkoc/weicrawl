@@ -314,6 +314,40 @@ func TestOfficialAccountSyncSkipsWithoutCredentials(t *testing.T) {
 	}
 }
 
+func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	code, out, errOut := runForTest("--json", "metadata")
+	if code != 0 {
+		t.Fatalf("metadata code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	commands := payload["commands"].(map[string]any)
+	for _, name := range []string{"sync", "profiles", "contacts", "messages", "favorites", "articles", "media", "runs"} {
+		if _, ok := commands[name]; !ok {
+			t.Fatalf("metadata command %q missing: %#v", name, commands)
+		}
+	}
+	syncCommand := commands["sync"].(map[string]any)
+	argv := syncCommand["argv"].([]any)
+	if got := fmt.Sprint(argv[len(argv)-2]) + " " + fmt.Sprint(argv[len(argv)-1]); got != "--source all" {
+		t.Fatalf("sync argv = %#v", argv)
+	}
+	capabilities := map[string]bool{}
+	for _, value := range payload["capabilities"].([]any) {
+		capabilities[fmt.Sprint(value)] = true
+	}
+	for _, name := range []string{"desktop-backup", "jsonl-import", "official-account-api"} {
+		if !capabilities[name] {
+			t.Fatalf("capability %q missing: %#v", name, capabilities)
+		}
+	}
+}
+
 func TestCLISyncDesktopBackup(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))
