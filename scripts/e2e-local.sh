@@ -18,6 +18,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
+GOBIN="$tmpdir/bin" GOWORK=off go install ./cmd/weicrawl
+weicrawl="$tmpdir/bin/weicrawl"
+
 export HOME="$tmpdir/home"
 export XDG_CONFIG_HOME="$tmpdir/config"
 export XDG_CACHE_HOME="$tmpdir/cache"
@@ -79,25 +82,26 @@ conn.commit()
 conn.close()
 PY
 
-go run ./cmd/weicrawl --json init > "$tmpdir/init.json"
-go run ./cmd/weicrawl --json metadata > "$tmpdir/metadata.json"
-go run ./cmd/weicrawl --json doctor > "$tmpdir/doctor.json"
+"$weicrawl" --json init > "$tmpdir/init.json"
+"$weicrawl" --json version > "$tmpdir/version.json"
+"$weicrawl" --json metadata > "$tmpdir/metadata.json"
+"$weicrawl" --json doctor > "$tmpdir/doctor.json"
 env -u WEICRAWL_WECHAT_APP_ID -u WEICRAWL_WECHAT_APP_SECRET \
-  go run ./cmd/weicrawl --json sync --source all --keep-source-snapshot > "$tmpdir/sync-all.json"
-go run ./cmd/weicrawl --json status > "$tmpdir/status.json"
-go run ./cmd/weicrawl --json unlock status > "$tmpdir/unlock-status.json"
-go run ./cmd/weicrawl --json unlock scan-keys --allow-process-inspect > "$tmpdir/scan-plan.json"
-go run ./cmd/weicrawl --json search "e2e fixture" > "$tmpdir/search.json"
-go run ./cmd/weicrawl --json export --format jsonl --out "$tmpdir/archive.jsonl" > "$tmpdir/export-jsonl.json"
-go run ./cmd/weicrawl --json export --format markdown --out "$tmpdir/markdown" > "$tmpdir/export-markdown.json"
-go run ./cmd/weicrawl --json --db "$tmpdir/jsonl-import.db" init > "$tmpdir/jsonl-import-init.json"
-go run ./cmd/weicrawl --json --db "$tmpdir/jsonl-import.db" import --format jsonl "$tmpdir/archive.jsonl" > "$tmpdir/import-jsonl.json"
-go run ./cmd/weicrawl --json --db "$tmpdir/jsonl-import.db" search "e2e fixture" > "$tmpdir/search-jsonl-import.json"
-go run ./cmd/weicrawl --json snapshot create --out "$tmpdir/snapshot" > "$tmpdir/snapshot-create.json"
-go run ./cmd/weicrawl --json --db "$tmpdir/snapshot-import.db" init > "$tmpdir/snapshot-import-init.json"
-go run ./cmd/weicrawl --json --db "$tmpdir/snapshot-import.db" import "$tmpdir/snapshot" > "$tmpdir/import-snapshot.json"
-go run ./cmd/weicrawl --json --db "$tmpdir/snapshot-import.db" search "e2e fixture" > "$tmpdir/search-snapshot-import.json"
-go run ./cmd/weicrawl --json tui > "$tmpdir/tui.json"
+  "$weicrawl" --json sync --source all --keep-source-snapshot > "$tmpdir/sync-all.json"
+"$weicrawl" --json status > "$tmpdir/status.json"
+"$weicrawl" --json unlock status > "$tmpdir/unlock-status.json"
+"$weicrawl" --json unlock scan-keys --allow-process-inspect > "$tmpdir/scan-plan.json"
+"$weicrawl" --json search "e2e fixture" > "$tmpdir/search.json"
+"$weicrawl" --json export --format jsonl --out "$tmpdir/archive.jsonl" > "$tmpdir/export-jsonl.json"
+"$weicrawl" --json export --format markdown --out "$tmpdir/markdown" > "$tmpdir/export-markdown.json"
+"$weicrawl" --json --db "$tmpdir/jsonl-import.db" init > "$tmpdir/jsonl-import-init.json"
+"$weicrawl" --json --db "$tmpdir/jsonl-import.db" import --format jsonl "$tmpdir/archive.jsonl" > "$tmpdir/import-jsonl.json"
+"$weicrawl" --json --db "$tmpdir/jsonl-import.db" search "e2e fixture" > "$tmpdir/search-jsonl-import.json"
+"$weicrawl" --json snapshot create --out "$tmpdir/snapshot" > "$tmpdir/snapshot-create.json"
+"$weicrawl" --json --db "$tmpdir/snapshot-import.db" init > "$tmpdir/snapshot-import-init.json"
+"$weicrawl" --json --db "$tmpdir/snapshot-import.db" import "$tmpdir/snapshot" > "$tmpdir/import-snapshot.json"
+"$weicrawl" --json --db "$tmpdir/snapshot-import.db" search "e2e fixture" > "$tmpdir/search-snapshot-import.json"
+"$weicrawl" --json tui > "$tmpdir/tui.json"
 
 python3 - "$tmpdir" <<'PY'
 import json
@@ -178,23 +182,23 @@ if [[ -n "${WEICRAWL_LIVE_KEYS:-}" || -n "${WEICRAWL_LIVE_SNAPSHOT:-}" ]]; then
   fi
 
   echo "== optional live copied-snapshot unlock probe =="
-  go run ./cmd/weicrawl --json doctor \
+  "$weicrawl" --json doctor \
     --probe-unlock \
     --probe-decrypt \
     --keys "$WEICRAWL_LIVE_KEYS" \
     --snapshot "$WEICRAWL_LIVE_SNAPSHOT" > "$tmpdir/live-doctor-unlock.json"
-  go run ./cmd/weicrawl --json unlock desktop \
+  "$weicrawl" --json unlock desktop \
     --explain \
     --probe-decrypt \
     --keys "$WEICRAWL_LIVE_KEYS" \
     --snapshot "$WEICRAWL_LIVE_SNAPSHOT" > "$tmpdir/live-unlock-probe.json"
 
   if [[ "${WEICRAWL_LIVE_UNLOCK_SYNC:-0}" == "1" ]]; then
-    go run ./cmd/weicrawl --json unlock desktop \
+    "$weicrawl" --json unlock desktop \
       --keys "$WEICRAWL_LIVE_KEYS" \
       --snapshot "$WEICRAWL_LIVE_SNAPSHOT" \
       --out "$tmpdir/decrypted" \
       --sync > "$tmpdir/live-unlock-sync.json"
-    go run ./cmd/weicrawl --json status > "$tmpdir/live-status-after-unlock.json"
+    "$weicrawl" --json status > "$tmpdir/live-status-after-unlock.json"
   fi
 fi
