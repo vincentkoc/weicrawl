@@ -53,6 +53,7 @@ type SyncResult struct {
 	Status             string   `json:"status"`
 	Since              string   `json:"since,omitempty"`
 	SnapshotPath       string   `json:"snapshot_path,omitempty"`
+	DecryptedSnapshot  string   `json:"decrypted_snapshot_path,omitempty"`
 	SourceDBCount      int      `json:"source_db_count"`
 	ImportedProfiles   int64    `json:"imported_profiles"`
 	ImportedContacts   int64    `json:"imported_contacts"`
@@ -222,7 +223,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 	return result, err
 }
 
-func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID, decryptedDir, appVersion, since string) (SyncResult, error) {
+func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID, decryptedDir, appVersion, since string, keepDecrypted bool) (SyncResult, error) {
 	started := time.Now().UTC()
 	runID := "decrypted-" + started.Format("20060102T150405.000000000Z")
 	if strings.TrimSpace(profileID) == "" {
@@ -239,6 +240,9 @@ func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID
 		Since:         since,
 		SnapshotPath:  decryptedDir,
 		SourceDBCount: len(files),
+	}
+	if keepDecrypted {
+		result.DecryptedSnapshot = decryptedDir
 	}
 	if err := arc.UpsertProfile(ctx, profileID, "", "", decryptedDir, appVersion, map[string]any{"source": "decrypted-dir", "path": decryptedDir}); err != nil {
 		return result, err

@@ -825,6 +825,16 @@ func TestCLISyncDecryptedDir(t *testing.T) {
 	if got := int(payload["imported_messages"].(float64)); got != 1 {
 		t.Fatalf("imported_messages = %d, payload=%#v", got, payload)
 	}
+	code, out, errOut = runForTest("--json", "sync", "--source", "desktop-macos", "--profile", "profile-decrypted", "--decrypted-dir", decrypted, "--keep-decrypted-snapshot")
+	if code != 0 {
+		t.Fatalf("sync keep decrypted code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(payload["decrypted_snapshot_path"]) != decrypted {
+		t.Fatalf("decrypted snapshot path missing: %#v", payload)
+	}
 }
 
 func TestCLIUnlockDecryptThenSyncEncryptedFixture(t *testing.T) {

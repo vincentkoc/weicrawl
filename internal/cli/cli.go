@@ -48,16 +48,17 @@ type env struct {
 }
 
 type syncOptions struct {
-	Source       string
-	Profile      string
-	IncludeMedia bool
-	MediaMode    string
-	KeepSource   bool
-	DecryptedDir string
-	BackupRoot   string
-	ImportPath   string
-	ImportFormat string
-	Since        string
+	Source        string
+	Profile       string
+	IncludeMedia  bool
+	MediaMode     string
+	KeepSource    bool
+	KeepDecrypted bool
+	DecryptedDir  string
+	BackupRoot    string
+	ImportPath    string
+	ImportFormat  string
+	Since         string
 }
 
 type syncAllResult struct {
@@ -359,8 +360,8 @@ func (e env) runSync(args []string) error {
 	if *concurrency < 1 {
 		return output.UsageError{Err: errors.New("--concurrency must be at least 1")}
 	}
-	if *keepDecrypted {
-		return errors.New("--keep-decrypted-snapshot is reserved for the future explicit unlock flow")
+	if *keepDecrypted && strings.TrimSpace(*decryptedDir) == "" {
+		return output.UsageError{Err: errors.New("--keep-decrypted-snapshot requires --decrypted-dir")}
 	}
 	if *mediaMode != "" && *mediaMode != "metadata" && *mediaMode != "copy" {
 		return output.UsageError{Err: fmt.Errorf("unsupported media mode %q", *mediaMode)}
@@ -375,16 +376,17 @@ func (e env) runSync(args []string) error {
 		return output.UsageError{Err: fmt.Errorf("--since is not supported with source %q yet", *source)}
 	}
 	opts := syncOptions{
-		Source:       *source,
-		Profile:      *profileFlag,
-		IncludeMedia: *includeMedia,
-		MediaMode:    *mediaMode,
-		KeepSource:   *keepSource,
-		DecryptedDir: *decryptedDir,
-		BackupRoot:   *backupRoot,
-		ImportPath:   *importPath,
-		ImportFormat: *importFormat,
-		Since:        sinceValue,
+		Source:        *source,
+		Profile:       *profileFlag,
+		IncludeMedia:  *includeMedia,
+		MediaMode:     *mediaMode,
+		KeepSource:    *keepSource,
+		KeepDecrypted: *keepDecrypted,
+		DecryptedDir:  *decryptedDir,
+		BackupRoot:    *backupRoot,
+		ImportPath:    *importPath,
+		ImportFormat:  *importFormat,
+		Since:         sinceValue,
 	}
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
@@ -540,7 +542,7 @@ func (e env) syncDesktop(arc *archive.Archive, opts syncOptions) (desktopmac.Syn
 		if profileID == "" {
 			profileID = "decrypted"
 		}
-		return desktopmac.SyncDecryptedDirectory(e.ctx, arc, profileID, config.Expand(opts.DecryptedDir), "", opts.Since)
+		return desktopmac.SyncDecryptedDirectory(e.ctx, arc, profileID, config.Expand(opts.DecryptedDir), "", opts.Since, opts.KeepDecrypted)
 	}
 	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
 	profile, ok := desktopmac.SelectProfile(disc, opts.Profile)
