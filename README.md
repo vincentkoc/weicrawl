@@ -28,6 +28,8 @@ Implemented:
   - `SessionTable`
   - `Name2Id`
   - `Msg_<md5(username)>`
+  - rich link/media payloads inside native messages
+  - conservative favorite/moment table shapes when recognizable
 - `wechat_keys.json` manifest decrypt workflow using `sqlcipher`
 - explicit `unlock scan-keys` planner/wrapper for reviewed external extractors
 - official-account token and news-material ingestion path
@@ -37,8 +39,9 @@ Not done until proven live:
 
 - extracting WeChat 4.1.x SQLCipher keys
 - live decrypt/import against this machine's real copied WeChat snapshot
-- broader native schema coverage for favorites, biz messages, moments, and rich
-  media records
+- live proof for native favorites, biz messages, moments, and rich media records
+- broader native schema coverage for biz messages and version-specific table
+  variants
 
 ## quick start
 
