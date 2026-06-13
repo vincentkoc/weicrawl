@@ -797,7 +797,7 @@ func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 	for _, value := range payload["capabilities"].([]any) {
 		capabilities[fmt.Sprint(value)] = true
 	}
-	for _, name := range []string{"desktop-backup", "jsonl-import", "official-account-api", "official-token-metadata-cache", "unlock-sync"} {
+	for _, name := range []string{"desktop-backup", "jsonl-import", "official-account-api", "official-rate-limit-posture", "official-token-metadata-cache", "unlock-sync"} {
 		if !capabilities[name] {
 			t.Fatalf("capability %q missing: %#v", name, capabilities)
 		}

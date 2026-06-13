@@ -3,6 +3,7 @@ package officialaccount
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -126,6 +127,104 @@ func TestSyncRedactsOfficialAccountSecretFromTokenErrors(t *testing.T) {
 		if !strings.Contains(text, "secret=[redacted]") {
 			t.Fatalf("redaction missing from error text: %s", text)
 		}
+	}
+}
+
+func TestSyncReportsOfficialAccountMaterialRateLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cgi-bin/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"token-value","expires_in":7200}`))
+		case "/cgi-bin/material/batchget_material":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"errcode":45009,"errmsg":"api freq out of limit"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("APP_ID_ENV", "app")
+	t.Setenv("APP_SECRET_ENV", "secret")
+	arc, err := archive.Open(context.Background(), filepath.Join(t.TempDir(), "weicrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer arc.Close()
+	result, err := Sync(context.Background(), arc, Options{
+		Config:  config.OfficialAccountConfig{AppIDEnv: "APP_ID_ENV", AppSecretEnv: "APP_SECRET_ENV"},
+		BaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "partial" || !result.RateLimited || result.RetryAfter != "60" || result.ErrCode != 45009 {
+		t.Fatalf("rate limit posture missing: %#v", result)
+	}
+	warnings := strings.Join(result.Warnings, "\n")
+	if !strings.Contains(warnings, "rate limited") || !strings.Contains(warnings, "retry_after=60") {
+		t.Fatalf("rate limit warning missing: %s", warnings)
+	}
+	if strings.Contains(warnings, "token-value") {
+		t.Fatalf("token leaked in warning: %s", warnings)
+	}
+}
+
+func TestSyncReportsOfficialAccountTokenRateLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/cgi-bin/token" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "120")
+		_, _ = w.Write([]byte(`{"errcode":45009,"errmsg":"api freq out of limit"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("APP_ID_ENV", "app")
+	t.Setenv("APP_SECRET_ENV", "secret")
+	arc, err := archive.Open(context.Background(), filepath.Join(t.TempDir(), "weicrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer arc.Close()
+	result, err := Sync(context.Background(), arc, Options{
+		Config:  config.OfficialAccountConfig{AppIDEnv: "APP_ID_ENV", AppSecretEnv: "APP_SECRET_ENV"},
+		BaseURL: server.URL,
+	})
+	if err == nil {
+		t.Fatal("expected token rate limit error")
+	}
+	if result.Status != "failed" || !result.RateLimited || result.RetryAfter != "120" || result.ErrCode != 45009 {
+		t.Fatalf("token rate limit posture missing: result=%#v err=%v", result, err)
+	}
+	if !strings.Contains(err.Error(), "rate limited") || !strings.Contains(err.Error(), "retry_after=120") {
+		t.Fatalf("rate limit error missing retry posture: %v", err)
+	}
+}
+
+func TestFetchAccessTokenReportsPlainHTTPRateLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("too frequent"))
+	}))
+	defer server.Close()
+
+	_, err := fetchAccessToken(context.Background(), server.URL, "app", "secret")
+	if err == nil {
+		t.Fatal("expected rate limit error")
+	}
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected apiError, got %T %v", err, err)
+	}
+	if !apiErr.RateLimited || apiErr.RetryAfter != "30" || apiErr.HTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("plain HTTP rate limit not classified: %#v", apiErr)
 	}
 }
 

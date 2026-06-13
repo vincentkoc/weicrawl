@@ -112,6 +112,10 @@ required_commands = {"init", "doctor", "metadata", "status", "sync", "unlock", "
 missing = sorted(required_commands - set(metadata.get("commands", {})))
 if missing:
     raise SystemExit(f"metadata missing commands: {missing}")
+required_capabilities = {"official-rate-limit-posture", "official-token-metadata-cache", "jsonl-export", "snapshot-export", "unlock-sync"}
+missing_capabilities = sorted(required_capabilities - set(metadata.get("capabilities", [])))
+if missing_capabilities:
+    raise SystemExit(f"metadata missing capabilities: {missing_capabilities}")
 
 sync = payloads["sync-all"]
 if sync.get("source") != "all" or sync.get("status") not in {"success", "partial", "skipped"}:

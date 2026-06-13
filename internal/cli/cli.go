@@ -1904,6 +1904,7 @@ func manifest() control.Manifest {
 		"snapshot-export",
 		"tui",
 		"official-account-api",
+		"official-rate-limit-posture",
 		"official-token-metadata-cache",
 	}
 	for _, cmd := range []control.Command{

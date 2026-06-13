@@ -33,8 +33,8 @@ Implemented:
   - conservative favorite/moment table shapes when recognizable
 - `wechat_keys.json` manifest decrypt workflow using `sqlcipher`
 - explicit `unlock scan-keys` planner/wrapper for reviewed external extractors
-- official-account token probe, non-secret token-cache posture, and
-  news-material ingestion path
+- official-account token probe, rate-limit posture, non-secret token-cache
+  posture, and news-material ingestion path
 - synthetic e2e coverage
 
 Not done until proven live:

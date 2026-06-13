@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +36,9 @@ type Result struct {
 	TokenCacheSafe    bool     `json:"token_cache_safe"`
 	RawTokenPersisted bool     `json:"raw_token_persisted"`
 	ExpiresIn         int64    `json:"expires_in,omitempty"`
+	RateLimited       bool     `json:"rate_limited,omitempty"`
+	RetryAfter        string   `json:"retry_after,omitempty"`
+	ErrCode           int64    `json:"errcode,omitempty"`
 	Accounts          int64    `json:"accounts,omitempty"`
 	Articles          int64    `json:"articles,omitempty"`
 	Warnings          []string `json:"warnings,omitempty"`
@@ -60,6 +64,15 @@ type materialListResponse struct {
 	Items      []materialItem `json:"item"`
 	ErrCode    int64          `json:"errcode"`
 	ErrMsg     string         `json:"errmsg"`
+}
+
+type apiError struct {
+	Operation   string
+	HTTPStatus  int
+	Code        int64
+	Message     string
+	RetryAfter  string
+	RateLimited bool
 }
 
 type materialItem struct {
@@ -105,6 +118,7 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 	}
 	token, err := fetchAccessToken(ctx, baseURL, appID, appSecret)
 	if err != nil {
+		applyAPIError(&result, err)
 		err = redactOfficialError(err)
 		result.Status = "failed"
 		result.Warnings = append(result.Warnings, err.Error())
@@ -136,6 +150,7 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 	result.Accounts = 1
 	materials, err := fetchNewsMaterials(ctx, baseURL, token.AccessToken, 0, 20)
 	if err != nil {
+		applyAPIError(&result, err)
 		err = redactOfficialError(err)
 		result.Status = "partial"
 		result.Warnings = append(result.Warnings, err.Error())
@@ -209,6 +224,74 @@ func redactOfficialError(err error) error {
 	return fmt.Errorf("%s", officialSecretRE.ReplaceAllString(err.Error(), `${1}=[redacted]`))
 }
 
+func applyAPIError(result *Result, err error) {
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		return
+	}
+	if apiErr.RateLimited {
+		result.RateLimited = true
+	}
+	if apiErr.RetryAfter != "" {
+		result.RetryAfter = apiErr.RetryAfter
+	}
+	if apiErr.Code != 0 {
+		result.ErrCode = apiErr.Code
+	}
+}
+
+func (err *apiError) Error() string {
+	if err == nil {
+		return ""
+	}
+	parts := []string{err.Operation}
+	if err.HTTPStatus != 0 {
+		parts = append(parts, fmt.Sprintf("HTTP %d", err.HTTPStatus))
+	}
+	if err.Code != 0 {
+		parts = append(parts, fmt.Sprintf("errcode %d", err.Code))
+	}
+	if err.Message != "" {
+		parts = append(parts, err.Message)
+	}
+	if err.RateLimited {
+		parts = append(parts, "rate limited")
+	}
+	if err.RetryAfter != "" {
+		parts = append(parts, "retry_after="+err.RetryAfter)
+	}
+	return strings.Join(parts, ": ")
+}
+
+func newAPIError(operation string, status int, code int64, message, retryAfter string) *apiError {
+	err := &apiError{
+		Operation:  operation,
+		HTTPStatus: status,
+		Code:       code,
+		Message:    strings.TrimSpace(message),
+		RetryAfter: strings.TrimSpace(retryAfter),
+	}
+	err.RateLimited = status == http.StatusTooManyRequests || isRateLimitedCode(code) || rateLimitText(err.Message)
+	return err
+}
+
+func isRateLimitedCode(code int64) bool {
+	switch code {
+	case 45009, 45011, 45015, 45047:
+		return true
+	default:
+		return false
+	}
+}
+
+func rateLimitText(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "too frequent") ||
+		(strings.Contains(message, "freq") && strings.Contains(message, "limit")) ||
+		strings.Contains(message, "quota")
+}
+
 func fetchNewsMaterials(ctx context.Context, baseURL, accessToken string, offset, count int) (materialListResponse, error) {
 	endpoint, err := url.Parse(baseURL + "/cgi-bin/material/batchget_material")
 	if err != nil {
@@ -235,13 +318,16 @@ func fetchNewsMaterials(ctx context.Context, baseURL, accessToken string, offset
 	}
 	var materials materialListResponse
 	if err := json.Unmarshal(bytes, &materials); err != nil {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return materialListResponse{}, newAPIError("official-account materials", resp.StatusCode, 0, string(bytes), resp.Header.Get("Retry-After"))
+		}
 		return materialListResponse{}, fmt.Errorf("decode official-account materials: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return materialListResponse{}, fmt.Errorf("official-account materials HTTP %d", resp.StatusCode)
+		return materialListResponse{}, newAPIError("official-account materials", resp.StatusCode, materials.ErrCode, materials.ErrMsg, resp.Header.Get("Retry-After"))
 	}
 	if materials.ErrCode != 0 {
-		return materialListResponse{}, fmt.Errorf("official-account materials error %d: %s", materials.ErrCode, materials.ErrMsg)
+		return materialListResponse{}, newAPIError("official-account materials", resp.StatusCode, materials.ErrCode, materials.ErrMsg, resp.Header.Get("Retry-After"))
 	}
 	return materials, nil
 }
@@ -287,15 +373,22 @@ func fetchAccessToken(ctx context.Context, baseURL, appID, appSecret string) (to
 		return tokenResponse{}, fmt.Errorf("fetch official-account token: %w", err)
 	}
 	defer resp.Body.Close()
+	bytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return tokenResponse{}, err
+	}
 	var token tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+	if err := json.Unmarshal(bytes, &token); err != nil {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return tokenResponse{}, newAPIError("official-account token", resp.StatusCode, 0, string(bytes), resp.Header.Get("Retry-After"))
+		}
 		return tokenResponse{}, fmt.Errorf("decode official-account token: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return tokenResponse{}, fmt.Errorf("official-account token HTTP %d", resp.StatusCode)
+		return tokenResponse{}, newAPIError("official-account token", resp.StatusCode, token.ErrCode, token.ErrMsg, resp.Header.Get("Retry-After"))
 	}
 	if token.ErrCode != 0 {
-		return tokenResponse{}, fmt.Errorf("official-account token error %d: %s", token.ErrCode, token.ErrMsg)
+		return tokenResponse{}, newAPIError("official-account token", resp.StatusCode, token.ErrCode, token.ErrMsg, resp.Header.Get("Retry-After"))
 	}
 	if token.AccessToken == "" {
 		return tokenResponse{}, fmt.Errorf("official-account token response did not include access_token")
