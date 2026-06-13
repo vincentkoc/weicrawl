@@ -98,6 +98,21 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(sync["imported_media"].(float64)); got != 1 {
 		t.Fatalf("imported_media = %d, sync=%#v", got, sync)
 	}
+	code, out, errOut = runForTest("--json", "sync", "--profile", "wxid_fixture", "--include-media", "--media-mode", "copy", "--keep-source-snapshot")
+	if code != 0 {
+		t.Fatalf("sync media copy code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &sync); err != nil {
+		t.Fatal(err)
+	}
+	mediaSnapshot := fmt.Sprint(sync["snapshot_path"])
+	if mediaSnapshot == "" {
+		t.Fatalf("media copy snapshot missing: %#v", sync)
+	}
+	copiedMedia := filepath.Join(mediaSnapshot, "media", "msg", "file", "2026-06", "sample.txt")
+	if bytes, err := os.ReadFile(copiedMedia); err != nil || string(bytes) != "sample media" {
+		t.Fatalf("copied media = %q err=%v", string(bytes), err)
+	}
 
 	code, out, errOut = runForTest("--json", "status")
 	if code != 0 {

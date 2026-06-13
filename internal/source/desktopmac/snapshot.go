@@ -348,7 +348,7 @@ func ImportMediaMetadata(ctx context.Context, arc *archive.Archive, profileID st
 			raw := map[string]any{"metadata_path": path, "relative_path": rel}
 			rawJSON, _ := json.Marshal(raw)
 			kind := mediaKind(rel)
-			sum := sha256.Sum256([]byte(root + "\x00" + rel))
+			sum := sha256.Sum256([]byte(profileID + "\x00" + rel))
 			mediaID := hex.EncodeToString(sum[:])
 			if err := arc.UpsertMedia(ctx, archive.MediaItem{
 				ProfileID:   profileID,

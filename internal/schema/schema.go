@@ -91,6 +91,15 @@ create table if not exists message_events (
   payload_json text not null
 );
 
+create unique index if not exists message_events_identity on message_events(
+  profile_id,
+  chat_id,
+  message_id,
+  event_type,
+  event_at,
+  payload_json
+);
+
 create table if not exists media_items (
   profile_id text not null,
   media_id text not null,

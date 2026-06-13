@@ -336,7 +336,7 @@ func (a *Archive) InsertMessageEvent(ctx context.Context, event MessageEvent) er
 	if strings.TrimSpace(eventAt) == "" {
 		eventAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	_, err := a.store.DB().ExecContext(ctx, `insert into message_events(profile_id, chat_id, message_id, event_type, event_at, payload_json) values(?,?,?,?,?,?)`,
+	_, err := a.store.DB().ExecContext(ctx, `insert or ignore into message_events(profile_id, chat_id, message_id, event_type, event_at, payload_json) values(?,?,?,?,?,?)`,
 		event.ProfileID, event.ChatID, event.MessageID, defaultString(event.EventType, "unknown"), eventAt, defaultString(event.PayloadJSON, "{}"))
 	return err
 }
