@@ -55,7 +55,11 @@ type SyncResult struct {
 	ImportedContacts   int64    `json:"imported_contacts"`
 	ImportedChats      int64    `json:"imported_chats"`
 	ImportedMessages   int64    `json:"imported_messages"`
+	ImportedParts      int64    `json:"imported_message_parts"`
+	ImportedEvents     int64    `json:"imported_message_events"`
 	ImportedMedia      int64    `json:"imported_media"`
+	ImportedFavorites  int64    `json:"imported_favorites"`
+	ImportedMoments    int64    `json:"imported_moments"`
 	ImportedRawRecords int64    `json:"imported_raw_records"`
 	Warnings           []string `json:"warnings,omitempty"`
 }
@@ -160,7 +164,11 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 	result.ImportedContacts = importResult.Contacts
 	result.ImportedChats = importResult.Chats
 	result.ImportedMessages = importResult.Messages
+	result.ImportedParts = importResult.MessageParts
+	result.ImportedEvents = importResult.MessageEvents
 	result.ImportedMedia = importResult.Media
+	result.ImportedFavorites = importResult.Favorites
+	result.ImportedMoments = importResult.Moments
 	result.ImportedRawRecords = importResult.RawRecords
 	mediaCount, mediaErr := ImportMediaMetadata(ctx, arc, snap.ProfileID, snap.MediaDirs)
 	result.ImportedMedia += mediaCount
@@ -233,7 +241,11 @@ func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID
 	result.ImportedContacts = importResult.Contacts
 	result.ImportedChats = importResult.Chats
 	result.ImportedMessages = importResult.Messages
+	result.ImportedParts = importResult.MessageParts
+	result.ImportedEvents = importResult.MessageEvents
 	result.ImportedMedia = importResult.Media
+	result.ImportedFavorites = importResult.Favorites
+	result.ImportedMoments = importResult.Moments
 	result.ImportedRawRecords = importResult.RawRecords
 	result.Warnings = append(result.Warnings, warnings...)
 	status := "success"

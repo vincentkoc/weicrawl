@@ -72,6 +72,18 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(sync["imported_messages"].(float64)); got != 2 {
 		t.Fatalf("imported_messages = %d, sync=%#v", got, sync)
 	}
+	if got := int(sync["imported_message_parts"].(float64)); got != 1 {
+		t.Fatalf("imported_message_parts = %d, sync=%#v", got, sync)
+	}
+	if got := int(sync["imported_message_events"].(float64)); got != 1 {
+		t.Fatalf("imported_message_events = %d, sync=%#v", got, sync)
+	}
+	if got := int(sync["imported_favorites"].(float64)); got != 1 {
+		t.Fatalf("imported_favorites = %d, sync=%#v", got, sync)
+	}
+	if got := int(sync["imported_moments"].(float64)); got != 1 {
+		t.Fatalf("imported_moments = %d, sync=%#v", got, sync)
+	}
 	if got := int(sync["imported_media"].(float64)); got != 1 {
 		t.Fatalf("imported_media = %d, sync=%#v", got, sync)
 	}
@@ -91,6 +103,12 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(archiveStatus["media_metadata_count"].(float64)); got != 1 {
 		t.Fatalf("media_metadata_count = %d, status=%#v", got, archiveStatus)
 	}
+	if got := int(archiveStatus["favorite_count"].(float64)); got != 1 {
+		t.Fatalf("favorite_count = %d, status=%#v", got, archiveStatus)
+	}
+	if got := int(archiveStatus["moment_count"].(float64)); got != 1 {
+		t.Fatalf("moment_count = %d, status=%#v", got, archiveStatus)
+	}
 
 	code, out, errOut = runForTest("--json", "search", "航班")
 	if code != 0 {
@@ -102,6 +120,16 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	}
 	if hits := search["hits"].([]any); len(hits) != 1 {
 		t.Fatalf("hits = %#v", hits)
+	}
+	code, out, errOut = runForTest("--json", "search", "boarding")
+	if code != 0 {
+		t.Fatalf("search boarding code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &search); err != nil {
+		t.Fatal(err)
+	}
+	if hits := search["hits"].([]any); len(hits) < 2 {
+		t.Fatalf("boarding hits = %#v", hits)
 	}
 
 	markdownDir := filepath.Join(root, "markdown")
@@ -138,6 +166,13 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	}
 	if messages != 2 {
 		t.Fatalf("imported messages = %d", messages)
+	}
+	var favorites int
+	if err := db.QueryRowContext(context.Background(), `select count(*) from favorites`).Scan(&favorites); err != nil {
+		t.Fatal(err)
+	}
+	if favorites != 1 {
+		t.Fatalf("imported favorites = %d", favorites)
 	}
 	_ = dbPath
 }
@@ -417,10 +452,18 @@ func createFixtureDB(t *testing.T, path string) {
 create table weicrawl_fixture_contacts(contact_id text, alias text, display_name text, remark_name text, kind text, avatar_ref text, raw_json text);
 create table weicrawl_fixture_chats(chat_id text, kind text, title text, last_message_at text, unread_count integer, muted integer, pinned integer, raw_json text);
 create table weicrawl_fixture_messages(message_id text, chat_id text, sender_id text, direction text, message_type text, sent_at text, text text, normalized_text text, source_rowid text, raw_json text);
+create table weicrawl_fixture_message_parts(message_id text, part_index integer, kind text, text text, media_id text, url text, raw_json text);
+create table weicrawl_fixture_message_events(chat_id text, message_id text, event_type text, event_at text, payload_json text);
+create table weicrawl_fixture_favorites(favorite_id text, kind text, title text, text text, source_ref text, raw_json text);
+create table weicrawl_fixture_moments(moment_id text, author_id text, text text, created_at text, raw_json text);
 insert into weicrawl_fixture_contacts values('alice', 'alice', 'Alice', '', 'user', '', '{}');
 insert into weicrawl_fixture_chats values('chat-1', 'direct', 'Alice', '2026-06-13T01:00:00Z', 0, 0, 0, '{}');
 insert into weicrawl_fixture_messages values('m1', 'chat-1', 'alice', 'inbound', 'text', '2026-06-13T01:00:00Z', 'hello from fixture', 'hello from fixture', '1', '{}');
 insert into weicrawl_fixture_messages values('m2', 'chat-1', 'alice', 'inbound', 'text', '2026-06-13T02:00:00Z', '航班 changed', '航班 changed', '2', '{}');
+insert into weicrawl_fixture_message_parts values('m2', 0, 'link', 'boarding pass link', '', 'https://example.invalid/boarding', '{}');
+insert into weicrawl_fixture_message_events values('chat-1', 'm2', 'edited', '2026-06-13T02:05:00Z', '{"reason":"fixture"}');
+insert into weicrawl_fixture_favorites values('fav-1', 'message', 'Boarding pass', 'saved boarding pass note', 'm2', '{}');
+insert into weicrawl_fixture_moments values('moment-1', 'alice', 'timeline launch note', '2026-06-13T03:00:00Z', '{}');
 `
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)

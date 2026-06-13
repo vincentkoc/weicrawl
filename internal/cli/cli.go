@@ -222,6 +222,7 @@ func (e env) runStatus() error {
 		control.NewCount("media_items", "Media metadata", status.MediaCount),
 		control.NewCount("favorites", "Favorites", status.FavoriteCount),
 		control.NewCount("biz_articles", "Public-account articles", status.PublicAccountArticleCount),
+		control.NewCount("moments", "Moments", status.MomentCount),
 	}
 	if status.LastSyncRun != nil {
 		ckStatus.LastSyncAt = status.LastSyncRun.FinishedAt

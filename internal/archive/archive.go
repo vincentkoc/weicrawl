@@ -33,6 +33,7 @@ type Status struct {
 	LastMessageAt             string           `json:"last_message_at,omitempty"`
 	MediaCount                int64            `json:"media_metadata_count"`
 	FavoriteCount             int64            `json:"favorite_count"`
+	MomentCount               int64            `json:"moment_count"`
 	PublicAccountArticleCount int64            `json:"public_account_article_count"`
 	LastSyncRun               *SyncRun         `json:"last_sync_run,omitempty"`
 	Counts                    []Count          `json:"counts"`
@@ -75,14 +76,38 @@ type Message struct {
 }
 
 type SearchHit struct {
+	Entity     string `json:"entity"`
+	ProfileID  string `json:"profile_id"`
+	MessageID  string `json:"message_id,omitempty"`
+	ArticleID  string `json:"article_id,omitempty"`
+	FavoriteID string `json:"favorite_id,omitempty"`
+	MomentID   string `json:"moment_id,omitempty"`
+	ChatID     string `json:"chat_id,omitempty"`
+	SenderID   string `json:"sender_id,omitempty"`
+	SentAt     string `json:"sent_at,omitempty"`
+	Type       string `json:"type"`
+	Text       string `json:"text"`
+	Rank       any    `json:"rank,omitempty"`
+}
+
+type MessagePart struct {
 	ProfileID string `json:"profile_id"`
 	MessageID string `json:"message_id"`
-	ChatID    string `json:"chat_id"`
-	SenderID  string `json:"sender_id,omitempty"`
-	SentAt    string `json:"sent_at,omitempty"`
-	Type      string `json:"type"`
-	Text      string `json:"text"`
-	Rank      any    `json:"rank,omitempty"`
+	PartIndex int64  `json:"part_index"`
+	Kind      string `json:"kind"`
+	Text      string `json:"text,omitempty"`
+	MediaID   string `json:"media_id,omitempty"`
+	URL       string `json:"url,omitempty"`
+	RawJSON   string `json:"raw_json,omitempty"`
+}
+
+type MessageEvent struct {
+	ProfileID   string `json:"profile_id"`
+	ChatID      string `json:"chat_id"`
+	MessageID   string `json:"message_id"`
+	EventType   string `json:"event_type"`
+	EventAt     string `json:"event_at"`
+	PayloadJSON string `json:"payload_json,omitempty"`
 }
 
 type MediaItem struct {
@@ -100,6 +125,16 @@ type MediaItem struct {
 	RawJSON     string `json:"raw_json,omitempty"`
 }
 
+type Favorite struct {
+	ProfileID  string `json:"profile_id"`
+	FavoriteID string `json:"favorite_id"`
+	Kind       string `json:"kind"`
+	Title      string `json:"title,omitempty"`
+	Text       string `json:"text,omitempty"`
+	SourceRef  string `json:"source_ref,omitempty"`
+	RawJSON    string `json:"raw_json,omitempty"`
+}
+
 type Article struct {
 	ProfileID   string `json:"profile_id"`
 	ArticleID   string `json:"article_id"`
@@ -109,6 +144,15 @@ type Article struct {
 	Summary     string `json:"summary,omitempty"`
 	PublishedAt string `json:"published_at,omitempty"`
 	RawJSON     string `json:"raw_json,omitempty"`
+}
+
+type Moment struct {
+	ProfileID string `json:"profile_id"`
+	MomentID  string `json:"moment_id"`
+	AuthorID  string `json:"author_id,omitempty"`
+	Text      string `json:"text,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	RawJSON   string `json:"raw_json,omitempty"`
 }
 
 func Open(ctx context.Context, path string) (*Archive, error) {
@@ -173,6 +217,10 @@ func (a *Archive) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return status, err
 	}
+	status.MomentCount, err = a.scalar(ctx, `select count(*) from moments`)
+	if err != nil {
+		return status, err
+	}
 	status.PublicAccountArticleCount, err = a.scalar(ctx, `select count(*) from biz_articles`)
 	if err != nil {
 		return status, err
@@ -203,6 +251,7 @@ func (a *Archive) Status(ctx context.Context) (Status, error) {
 		{ID: "media_items", Label: "Media metadata", Value: status.MediaCount},
 		{ID: "favorites", Label: "Favorites", Value: status.FavoriteCount},
 		{ID: "biz_articles", Label: "Public-account articles", Value: status.PublicAccountArticleCount},
+		{ID: "moments", Label: "Moments", Value: status.MomentCount},
 	}
 	return status, nil
 }
@@ -273,10 +322,33 @@ func (a *Archive) UpsertMessage(ctx context.Context, msg Message) error {
 	return err
 }
 
+func (a *Archive) UpsertMessagePart(ctx context.Context, part MessagePart) error {
+	_, err := a.store.DB().ExecContext(ctx, `insert into message_parts(profile_id, message_id, part_index, kind, text, media_id, url, raw_json) values(?,?,?,?,?,?,?,?) on conflict(profile_id, message_id, part_index) do update set kind=excluded.kind, text=excluded.text, media_id=excluded.media_id, url=excluded.url, raw_json=excluded.raw_json`,
+		part.ProfileID, part.MessageID, part.PartIndex, defaultString(part.Kind, "unknown"), part.Text, nullEmpty(part.MediaID), nullEmpty(part.URL), defaultString(part.RawJSON, "{}"))
+	return err
+}
+
+func (a *Archive) InsertMessageEvent(ctx context.Context, event MessageEvent) error {
+	eventAt := event.EventAt
+	if strings.TrimSpace(eventAt) == "" {
+		eventAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	_, err := a.store.DB().ExecContext(ctx, `insert into message_events(profile_id, chat_id, message_id, event_type, event_at, payload_json) values(?,?,?,?,?,?)`,
+		event.ProfileID, event.ChatID, event.MessageID, defaultString(event.EventType, "unknown"), eventAt, defaultString(event.PayloadJSON, "{}"))
+	return err
+}
+
 func (a *Archive) UpsertMedia(ctx context.Context, item MediaItem) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := a.store.DB().ExecContext(ctx, `insert into media_items(profile_id, media_id, kind, source_path, archive_path, mime_type, byte_size, sha256, width, height, duration_ms, raw_json, updated_at) values(?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict(profile_id, media_id) do update set kind=excluded.kind, source_path=excluded.source_path, archive_path=excluded.archive_path, mime_type=excluded.mime_type, byte_size=excluded.byte_size, sha256=excluded.sha256, width=excluded.width, height=excluded.height, duration_ms=excluded.duration_ms, raw_json=excluded.raw_json, updated_at=excluded.updated_at`,
 		item.ProfileID, item.MediaID, defaultString(item.Kind, "file"), nullEmpty(item.SourcePath), nullEmpty(item.ArchivePath), nullEmpty(item.MimeType), nullZero(item.ByteSize), nullEmpty(item.SHA256), nullZero(item.Width), nullZero(item.Height), nullZero(item.DurationMS), defaultString(item.RawJSON, "{}"), now)
+	return err
+}
+
+func (a *Archive) UpsertFavorite(ctx context.Context, favorite Favorite) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := a.store.DB().ExecContext(ctx, `insert into favorites(profile_id, favorite_id, kind, title, text, source_ref, raw_json, updated_at) values(?,?,?,?,?,?,?,?) on conflict(profile_id, favorite_id) do update set kind=excluded.kind, title=excluded.title, text=excluded.text, source_ref=excluded.source_ref, raw_json=excluded.raw_json, updated_at=excluded.updated_at`,
+		favorite.ProfileID, favorite.FavoriteID, defaultString(favorite.Kind, "unknown"), nullEmpty(favorite.Title), favorite.Text, nullEmpty(favorite.SourceRef), defaultString(favorite.RawJSON, "{}"), now)
 	return err
 }
 
@@ -292,6 +364,13 @@ func (a *Archive) UpsertArticle(ctx context.Context, article Article) error {
 	}
 	_, err = a.store.DB().ExecContext(ctx, `insert into article_fts(rowid, profile_id, article_id, account_id, body) values((select rowid from biz_articles where profile_id=? and article_id=?), ?, ?, ?, ?)`,
 		article.ProfileID, article.ArticleID, article.ProfileID, article.ArticleID, nullEmpty(article.AccountID), NormalizeText(article.Title+" "+article.Summary))
+	return err
+}
+
+func (a *Archive) UpsertMoment(ctx context.Context, moment Moment) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := a.store.DB().ExecContext(ctx, `insert into moments(profile_id, moment_id, author_id, text, created_at, raw_json, updated_at) values(?,?,?,?,?,?,?) on conflict(profile_id, moment_id) do update set author_id=excluded.author_id, text=excluded.text, created_at=excluded.created_at, raw_json=excluded.raw_json, updated_at=excluded.updated_at`,
+		moment.ProfileID, moment.MomentID, nullEmpty(moment.AuthorID), moment.Text, nullEmpty(moment.CreatedAt), defaultString(moment.RawJSON, "{}"), now)
 	return err
 }
 
@@ -330,6 +409,78 @@ func (a *Archive) SearchMessages(ctx context.Context, query, chat, sender, kind 
 		var hit SearchHit
 		if err := rows.Scan(&hit.ProfileID, &hit.MessageID, &hit.ChatID, &hit.SenderID, &hit.SentAt, &hit.Type, &hit.Text, &hit.Rank); err != nil {
 			return nil, err
+		}
+		hit.Entity = "message"
+		hits = append(hits, hit)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(chat) != "" || strings.TrimSpace(sender) != "" || strings.TrimSpace(kind) != "" {
+		return hits, nil
+	}
+	articleHits, err := a.searchArticleHits(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	hits = append(hits, articleHits...)
+	otherHits, err := a.searchStructuredTextHits(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	hits = append(hits, otherHits...)
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	return hits, nil
+}
+
+func (a *Archive) searchArticleHits(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+	rows, err := a.store.DB().QueryContext(ctx, `select a.profile_id, a.article_id, coalesce(a.account_id,''), coalesce(a.published_at,''), trim(a.title || ' ' || a.summary), bm25(article_fts) from article_fts join biz_articles a on a.rowid = article_fts.rowid where article_fts match ? order by bm25(article_fts) limit ?`, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hits []SearchHit
+	for rows.Next() {
+		var hit SearchHit
+		if err := rows.Scan(&hit.ProfileID, &hit.ArticleID, &hit.SenderID, &hit.SentAt, &hit.Text, &hit.Rank); err != nil {
+			return nil, err
+		}
+		hit.Entity = "article"
+		hit.Type = "article"
+		hits = append(hits, hit)
+	}
+	return hits, rows.Err()
+}
+
+func (a *Archive) searchStructuredTextHits(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+	pattern := "%" + query + "%"
+	rows, err := a.store.DB().QueryContext(ctx, `select 'message_part', profile_id, message_id, kind, coalesce(text,'') || ' ' || coalesce(url,''), '' from message_parts where text like ? or coalesce(url,'') like ?
+union all
+select 'favorite', profile_id, favorite_id, kind, coalesce(title,'') || ' ' || text, coalesce(updated_at,'') from favorites where coalesce(title,'') like ? or text like ?
+union all
+select 'moment', profile_id, moment_id, 'moment', text, coalesce(created_at,'') from moments where text like ?
+limit ?`, pattern, pattern, pattern, pattern, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hits []SearchHit
+	for rows.Next() {
+		var entity, id string
+		var hit SearchHit
+		if err := rows.Scan(&entity, &hit.ProfileID, &id, &hit.Type, &hit.Text, &hit.SentAt); err != nil {
+			return nil, err
+		}
+		hit.Entity = entity
+		switch entity {
+		case "message_part":
+			hit.MessageID = id
+		case "favorite":
+			hit.FavoriteID = id
+		case "moment":
+			hit.MomentID = id
 		}
 		hits = append(hits, hit)
 	}

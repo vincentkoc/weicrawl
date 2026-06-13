@@ -17,11 +17,15 @@ import (
 )
 
 type Result struct {
-	Contacts   int64 `json:"contacts"`
-	Chats      int64 `json:"chats"`
-	Messages   int64 `json:"messages"`
-	Media      int64 `json:"media"`
-	RawRecords int64 `json:"raw_records"`
+	Contacts      int64 `json:"contacts"`
+	Chats         int64 `json:"chats"`
+	Messages      int64 `json:"messages"`
+	MessageParts  int64 `json:"message_parts"`
+	MessageEvents int64 `json:"message_events"`
+	Media         int64 `json:"media"`
+	Favorites     int64 `json:"favorites"`
+	Moments       int64 `json:"moments"`
+	RawRecords    int64 `json:"raw_records"`
 }
 
 type File struct {
@@ -43,7 +47,11 @@ func ImportFixtureDatabases(ctx context.Context, arc *archive.Archive, profileID
 		result.Contacts += counts.Contacts
 		result.Chats += counts.Chats
 		result.Messages += counts.Messages
+		result.MessageParts += counts.MessageParts
+		result.MessageEvents += counts.MessageEvents
 		result.Media += counts.Media
+		result.Favorites += counts.Favorites
+		result.Moments += counts.Moments
 		result.RawRecords += counts.RawRecords
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %v", file.Role, err))
@@ -129,6 +137,74 @@ func importFixtureDB(ctx context.Context, arc *archive.Archive, db *sql.DB, prof
 				return result, err
 			}
 			result.Messages++
+		}
+	}
+	if tables["weicrawl_fixture_message_parts"] {
+		rows, err := db.QueryContext(ctx, `select message_id, coalesce(part_index,0), coalesce(kind,'unknown'), coalesce(text,''), coalesce(media_id,''), coalesce(url,''), coalesce(raw_json,'{}') from weicrawl_fixture_message_parts order by message_id, part_index`)
+		if err != nil {
+			return result, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			part := archive.MessagePart{ProfileID: profileID}
+			if err := rows.Scan(&part.MessageID, &part.PartIndex, &part.Kind, &part.Text, &part.MediaID, &part.URL, &part.RawJSON); err != nil {
+				return result, err
+			}
+			if err := arc.UpsertMessagePart(ctx, part); err != nil {
+				return result, err
+			}
+			result.MessageParts++
+		}
+	}
+	if tables["weicrawl_fixture_message_events"] {
+		rows, err := db.QueryContext(ctx, `select chat_id, message_id, coalesce(event_type,'unknown'), coalesce(event_at,''), coalesce(payload_json,'{}') from weicrawl_fixture_message_events order by event_at`)
+		if err != nil {
+			return result, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			event := archive.MessageEvent{ProfileID: profileID}
+			if err := rows.Scan(&event.ChatID, &event.MessageID, &event.EventType, &event.EventAt, &event.PayloadJSON); err != nil {
+				return result, err
+			}
+			if err := arc.InsertMessageEvent(ctx, event); err != nil {
+				return result, err
+			}
+			result.MessageEvents++
+		}
+	}
+	if tables["weicrawl_fixture_favorites"] {
+		rows, err := db.QueryContext(ctx, `select favorite_id, coalesce(kind,'unknown'), coalesce(title,''), coalesce(text,''), coalesce(source_ref,''), coalesce(raw_json,'{}') from weicrawl_fixture_favorites`)
+		if err != nil {
+			return result, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			favorite := archive.Favorite{ProfileID: profileID}
+			if err := rows.Scan(&favorite.FavoriteID, &favorite.Kind, &favorite.Title, &favorite.Text, &favorite.SourceRef, &favorite.RawJSON); err != nil {
+				return result, err
+			}
+			if err := arc.UpsertFavorite(ctx, favorite); err != nil {
+				return result, err
+			}
+			result.Favorites++
+		}
+	}
+	if tables["weicrawl_fixture_moments"] {
+		rows, err := db.QueryContext(ctx, `select moment_id, coalesce(author_id,''), coalesce(text,''), coalesce(created_at,''), coalesce(raw_json,'{}') from weicrawl_fixture_moments`)
+		if err != nil {
+			return result, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			moment := archive.Moment{ProfileID: profileID}
+			if err := rows.Scan(&moment.MomentID, &moment.AuthorID, &moment.Text, &moment.CreatedAt, &moment.RawJSON); err != nil {
+				return result, err
+			}
+			if err := arc.UpsertMoment(ctx, moment); err != nil {
+				return result, err
+			}
+			result.Moments++
 		}
 	}
 	return result, nil
@@ -522,7 +598,11 @@ func (r *Result) add(other Result) {
 	r.Contacts += other.Contacts
 	r.Chats += other.Chats
 	r.Messages += other.Messages
+	r.MessageParts += other.MessageParts
+	r.MessageEvents += other.MessageEvents
 	r.Media += other.Media
+	r.Favorites += other.Favorites
+	r.Moments += other.Moments
 	r.RawRecords += other.RawRecords
 }
 
