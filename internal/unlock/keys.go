@@ -50,6 +50,9 @@ type KeyReadiness struct {
 	DefaultKey  bool           `json:"default_key,omitempty"`
 	Found       []DecryptEntry `json:"found,omitempty"`
 	Missing     []DecryptEntry `json:"missing,omitempty"`
+	Probed      []DecryptEntry `json:"probed,omitempty"`
+	ProbeFailed []DecryptEntry `json:"probe_failed,omitempty"`
+	ProbeReady  bool           `json:"probe_ready,omitempty"`
 	Ready       bool           `json:"ready"`
 }
 
@@ -346,6 +349,14 @@ func DecryptSnapshot(ctx context.Context, opts DecryptOptions) (DecryptResult, e
 }
 
 func CheckSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
+	return checkSnapshotKeys(context.Background(), opts, false)
+}
+
+func ProbeSnapshotKeys(ctx context.Context, opts DecryptOptions) (KeyReadiness, error) {
+	return checkSnapshotKeys(ctx, opts, true)
+}
+
+func checkSnapshotKeys(ctx context.Context, opts DecryptOptions, probe bool) (KeyReadiness, error) {
 	if strings.TrimSpace(opts.SnapshotDir) == "" {
 		return KeyReadiness{}, errors.New("snapshot dir is required")
 	}
@@ -380,8 +391,18 @@ func CheckSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
 			continue
 		}
 		result.Found = append(result.Found, DecryptEntry{Database: rel})
+		if probe {
+			if err := probeOne(ctx, sqlcipher, src, resolved[rel]); err != nil {
+				result.ProbeFailed = append(result.ProbeFailed, DecryptEntry{Database: rel, Reason: err.Error()})
+				continue
+			}
+			result.Probed = append(result.Probed, DecryptEntry{Database: rel})
+		}
 	}
 	result.Ready = len(result.Found) > 0 && len(result.Missing) == 0
+	if probe {
+		result.ProbeReady = result.Ready && len(result.Probed) == len(result.Found) && len(result.ProbeFailed) == 0
+	}
 	return result, nil
 }
 
@@ -491,4 +512,35 @@ DETACH DATABASE plaintext;
 		return errors.New("decrypted output is empty")
 	}
 	return nil
+}
+
+func probeOne(ctx context.Context, sqlcipher, src, keyHex string) error {
+	commands := fmt.Sprintf(`PRAGMA key = "x'%s'";
+PRAGMA cipher_page_size = 4096;
+PRAGMA quick_check;
+`, keyHex)
+	cmd := exec.CommandContext(ctx, sqlcipher, src)
+	cmd.Stdin = strings.NewReader(commands)
+	output, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(output))
+	if err != nil {
+		return fmt.Errorf("sqlcipher probe failed: %s", text)
+	}
+	if !allOKLines(text) {
+		return fmt.Errorf("sqlcipher probe returned %q", text)
+	}
+	return nil
+}
+
+func allOKLines(text string) bool {
+	lines := strings.Fields(strings.TrimSpace(text))
+	if len(lines) == 0 {
+		return false
+	}
+	for _, line := range lines {
+		if line != "ok" {
+			return false
+		}
+	}
+	return true
 }

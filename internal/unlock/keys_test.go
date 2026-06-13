@@ -291,6 +291,67 @@ func TestDecryptSnapshotWithSQLCipherFixture(t *testing.T) {
 	}
 }
 
+func TestProbeSnapshotKeysWithSQLCipherFixture(t *testing.T) {
+	sqlcipher, err := FindSQLCipher("")
+	if err != nil {
+		t.Skip(err)
+	}
+	root := t.TempDir()
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	snapshotDB := filepath.Join(root, "snapshot", "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(snapshotDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(root, "plain.db")
+	createPlainNativeDB(t, plain)
+	encryptFixtureDB(t, sqlcipher, plain, snapshotDB, key)
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check, err := ProbeSnapshotKeys(context.Background(), DecryptOptions{
+		SnapshotDir: filepath.Join(root, "snapshot"),
+		KeysPath:    keysPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !check.Ready || !check.ProbeReady || len(check.Probed) != 1 || len(check.ProbeFailed) != 0 {
+		t.Fatalf("check = %#v", check)
+	}
+}
+
+func TestProbeSnapshotKeysReportsBadKey(t *testing.T) {
+	sqlcipher, err := FindSQLCipher("")
+	if err != nil {
+		t.Skip(err)
+	}
+	root := t.TempDir()
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	badKey := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	snapshotDB := filepath.Join(root, "snapshot", "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(snapshotDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(root, "plain.db")
+	createPlainNativeDB(t, plain)
+	encryptFixtureDB(t, sqlcipher, plain, snapshotDB, key)
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+badKey+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check, err := ProbeSnapshotKeys(context.Background(), DecryptOptions{
+		SnapshotDir: filepath.Join(root, "snapshot"),
+		KeysPath:    keysPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !check.Ready || check.ProbeReady || len(check.Probed) != 0 || len(check.ProbeFailed) != 1 {
+		t.Fatalf("check = %#v", check)
+	}
+}
+
 func TestDecryptSnapshotWithDefaultKey(t *testing.T) {
 	sqlcipher, err := FindSQLCipher("")
 	if err != nil {

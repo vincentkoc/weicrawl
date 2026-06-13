@@ -498,6 +498,51 @@ func TestUnlockDesktopExplainWithKeysIsDryRun(t *testing.T) {
 	}
 }
 
+func TestUnlockDesktopExplainCanProbeDecrypt(t *testing.T) {
+	sqlcipher, err := exec.LookPath("sqlcipher")
+	if err != nil {
+		sqlcipher = "/opt/homebrew/opt/sqlcipher/bin/sqlcipher"
+		if _, statErr := os.Stat(sqlcipher); statErr != nil {
+			t.Skip("sqlcipher unavailable")
+		}
+	}
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	plain := filepath.Join(root, "plain.db")
+	createNativeMessageDB(t, plain, "alice")
+	snapshotRoot := filepath.Join(root, "snapshot")
+	encrypted := filepath.Join(snapshotRoot, "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(encrypted), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	encryptSQLiteFixture(t, sqlcipher, plain, encrypted, key)
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(root, "decrypted")
+	code, out, errOut := runForTest("--json", "unlock", "desktop", "--explain", "--probe-decrypt", "--keys", keysPath, "--snapshot", snapshotRoot, "--sqlcipher", sqlcipher)
+	if code != 0 {
+		t.Fatalf("unlock explain probe code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload["available"].(bool) {
+		t.Fatalf("payload = %#v", payload)
+	}
+	check := payload["check"].(map[string]any)
+	if !check["probe_ready"].(bool) || len(check["probed"].([]any)) != 1 {
+		t.Fatalf("check = %#v", check)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created output dir: %v", err)
+	}
+}
+
 func TestDoctorProbeUnlockChecksManifestSnapshot(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))

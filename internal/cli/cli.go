@@ -204,6 +204,7 @@ func (e env) runInit(args []string) error {
 func (e env) runDoctor(args []string) error {
 	fs := newFlagSet("doctor")
 	probeUnlock := fs.Bool("probe-unlock", false, "probe configured unlock path")
+	probeDecrypt := fs.Bool("probe-decrypt", false, "verify supplied keys can open copied DBs")
 	keysPath := fs.String("keys", "", "wechat_keys.json path for unlock probe")
 	snapshotPath := fs.String("snapshot", "", "copied snapshot profile root for unlock probe")
 	sqlcipherPath := fs.String("sqlcipher", "", "sqlcipher binary path for unlock probe")
@@ -258,14 +259,21 @@ func (e env) runDoctor(args []string) error {
 		})
 	}
 	if *probeUnlock && strings.TrimSpace(*keysPath) != "" && strings.TrimSpace(*snapshotPath) != "" {
-		check, err := unlock.CheckSnapshotKeys(unlock.DecryptOptions{
+		opts := unlock.DecryptOptions{
 			SnapshotDir:   config.Expand(*snapshotPath),
 			KeysPath:      config.Expand(*keysPath),
 			SQLCipherPath: config.Expand(*sqlcipherPath),
-		})
+		}
+		var check unlock.KeyReadiness
+		var err error
+		if *probeDecrypt {
+			check, err = unlock.ProbeSnapshotKeys(e.ctx, opts)
+		} else {
+			check, err = unlock.CheckSnapshotKeys(opts)
+		}
 		checks = append(checks, map[string]any{
 			"id":    "unlock_readiness",
-			"ok":    err == nil && check.Ready,
+			"ok":    err == nil && check.Ready && (!*probeDecrypt || check.ProbeReady),
 			"check": check,
 			"error": errString(err),
 		})
@@ -614,6 +622,7 @@ func (e env) runUnlock(args []string) error {
 	storeKeychain := fs.Bool("store-keychain", false, "persist unlock material in keychain")
 	once := fs.Bool("once", false, "memory only")
 	explain := fs.Bool("explain", false, "explain planned method")
+	probeDecrypt := fs.Bool("probe-decrypt", false, "verify keys can open copied DBs without writing plaintext")
 	syncAfterUnlock := fs.Bool("sync", false, "ingest decrypted output after unlock")
 	keepDecrypted := fs.Bool("keep-decrypted-snapshot", e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots, "keep decrypted output after --sync")
 	script := fs.String("script", "", "key scanner script path")
@@ -648,12 +657,19 @@ func (e env) runUnlock(args []string) error {
 			if strings.TrimSpace(*snapshotPath) == "" {
 				return output.UsageError{Err: errors.New("unlock desktop --explain with --keys requires --snapshot")}
 			}
-			check, err := unlock.CheckSnapshotKeys(unlock.DecryptOptions{
+			opts := unlock.DecryptOptions{
 				SnapshotDir:   config.Expand(*snapshotPath),
 				OutputDir:     config.Expand(*outDir),
 				KeysPath:      config.Expand(*keysPath),
 				SQLCipherPath: config.Expand(*sqlcipherPath),
-			})
+			}
+			var check unlock.KeyReadiness
+			var err error
+			if *probeDecrypt {
+				check, err = unlock.ProbeSnapshotKeys(e.ctx, opts)
+			} else {
+				check, err = unlock.CheckSnapshotKeys(opts)
+			}
 			if err != nil {
 				return err
 			}
@@ -664,7 +680,7 @@ func (e env) runUnlock(args []string) error {
 				"profile":     *profile,
 				"persisted":   false,
 				"dry_run":     true,
-				"available":   check.Ready,
+				"available":   check.Ready && (!*probeDecrypt || check.ProbeReady),
 				"check":       check,
 				"next":        "rerun without --explain to decrypt the copied snapshot",
 			})

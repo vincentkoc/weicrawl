@@ -517,6 +517,8 @@ Must check:
 `--probe-unlock`. When `--probe-unlock --keys <manifest> --snapshot
 <copied-profile-root>` is supplied, it should run the same dry-run readiness
 check as `unlock desktop --explain` and still avoid writing decrypted files.
+With `--probe-decrypt`, it may run the same read-only SQLCipher open probe as
+`unlock desktop --explain --probe-decrypt`.
 
 ### `sync`
 
@@ -571,6 +573,7 @@ Flags:
 - `--store-keychain`
 - `--once`
 - `--explain`
+- `--probe-decrypt`
 - `--sync`
 - `--keep-decrypted-snapshot`
 
@@ -578,6 +581,9 @@ Flags:
 is a dry-run readiness check. It verifies the manifest shape, matching snapshot
 DB paths, and `sqlcipher` availability without writing decrypted files. Running
 without `--explain` requires `--out` and performs the decrypt.
+When `--probe-decrypt` is also supplied, the dry run should ask `sqlcipher` to
+open copied snapshot DBs with the supplied keys and report probe success or
+failure without exporting plaintext.
 
 `unlock desktop --sync` should ingest the decrypted output into the configured
 archive immediately after decrypting the copied snapshot. It must still require

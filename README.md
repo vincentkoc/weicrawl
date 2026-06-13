@@ -100,6 +100,7 @@ go run ./cmd/weicrawl --json sync \
 
 go run ./cmd/weicrawl --json unlock desktop \
   --explain \
+  --probe-decrypt \
   --keys ./wechat_keys.json \
   --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile>
 
@@ -127,6 +128,10 @@ pointing at the requested manifest path.
 If a helper prints a valid `wechat_keys.json` object to stdout, even with
 surrounding logs, `weicrawl` writes that object to `--scan-out` instead of
 reducing it to a single default key.
+
+`unlock desktop --explain --probe-decrypt` is still read-only and does not write
+plaintext DBs. It asks `sqlcipher` to open the copied snapshot DBs with the
+supplied keys and reports whether the keys actually work.
 
 `wechat_keys.json` may either map individual copied database paths to keys or
 provide one profile key:
