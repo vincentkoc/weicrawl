@@ -183,6 +183,19 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if got := int(archiveStatus["moment_count"].(float64)); got != 1 {
 		t.Fatalf("moment_count = %d, status=%#v", got, archiveStatus)
 	}
+	lastRun := archiveStatus["last_sync_run"].(map[string]any)
+	if got := int(lastRun["imported_message_parts"].(float64)); got != 1 {
+		t.Fatalf("last run imported_message_parts = %d, run=%#v", got, lastRun)
+	}
+	if got := int(lastRun["imported_message_events"].(float64)); got != 1 {
+		t.Fatalf("last run imported_message_events = %d, run=%#v", got, lastRun)
+	}
+	if got := int(lastRun["imported_favorites"].(float64)); got != 1 {
+		t.Fatalf("last run imported_favorites = %d, run=%#v", got, lastRun)
+	}
+	if got := int(lastRun["imported_moments"].(float64)); got != 1 {
+		t.Fatalf("last run imported_moments = %d, run=%#v", got, lastRun)
+	}
 	sourceStatus := status["source"].(map[string]any)["desktop_macos"].(map[string]any)
 	if got := int(sourceStatus["profile_count"].(float64)); got != 1 {
 		t.Fatalf("source profile_count = %d, source=%#v", got, sourceStatus)
@@ -692,6 +705,13 @@ func TestCLISyncDesktopBackup(t *testing.T) {
 	values := runs["values"].([]any)
 	if len(values) != 1 || values[0].(map[string]any)["source"] != "desktop-backup" {
 		t.Fatalf("runs = %#v", runs)
+	}
+	run := values[0].(map[string]any)
+	if got := int(run["imported_message_parts"].(float64)); got != 1 {
+		t.Fatalf("run imported_message_parts = %d, run=%#v", got, run)
+	}
+	if got := int(run["imported_favorites"].(float64)); got != 1 {
+		t.Fatalf("run imported_favorites = %d, run=%#v", got, run)
 	}
 
 	sinceDB := filepath.Join(root, "since.db")

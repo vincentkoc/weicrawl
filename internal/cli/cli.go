@@ -965,18 +965,24 @@ func (e env) importJSONLResult(arc *archive.Archive, path, since string) (jsonlI
 	}
 	started := time.Now().UTC()
 	if err := arc.InsertSyncRun(e.ctx, archive.SyncRun{
-		RunID:              "import-" + started.Format("20060102T150405.000000000Z"),
-		Source:             result.Source,
-		StartedAt:          started.Format(time.RFC3339),
-		FinishedAt:         time.Now().UTC().Format(time.RFC3339),
-		Status:             "success",
-		SourceRoot:         path,
-		ImportedProfiles:   int64(result.Counts["profile"]),
-		ImportedContacts:   int64(result.Counts["contact"]),
-		ImportedChats:      int64(result.Counts["chat"]),
-		ImportedMessages:   int64(result.Counts["message"]),
-		ImportedMedia:      int64(result.Counts["media"]),
-		ImportedRawRecords: int64(result.Counts["raw_record"]),
+		RunID:               "import-" + started.Format("20060102T150405.000000000Z"),
+		Source:              result.Source,
+		StartedAt:           started.Format(time.RFC3339),
+		FinishedAt:          time.Now().UTC().Format(time.RFC3339),
+		Status:              "success",
+		SourceRoot:          path,
+		ImportedProfiles:    int64(result.Counts["profile"]),
+		ImportedContacts:    int64(result.Counts["contact"]),
+		ImportedChats:       int64(result.Counts["chat"]),
+		ImportedMessages:    int64(result.Counts["message"]),
+		ImportedParts:       int64(result.Counts["message_part"]),
+		ImportedEvents:      int64(result.Counts["message_event"]),
+		ImportedMedia:       int64(result.Counts["media"]),
+		ImportedBizAccounts: int64(result.Counts["biz_account"]),
+		ImportedArticles:    int64(result.Counts["article"]),
+		ImportedFavorites:   int64(result.Counts["favorite"]),
+		ImportedMoments:     int64(result.Counts["moment"]),
+		ImportedRawRecords:  int64(result.Counts["raw_record"]),
 	}); err != nil {
 		return result, err
 	}

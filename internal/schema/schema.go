@@ -188,7 +188,13 @@ create table if not exists sync_runs (
   imported_contacts integer not null default 0,
   imported_chats integer not null default 0,
   imported_messages integer not null default 0,
+  imported_message_parts integer not null default 0,
+  imported_message_events integer not null default 0,
   imported_media integer not null default 0,
+  imported_biz_accounts integer not null default 0,
+  imported_articles integer not null default 0,
+  imported_favorites integer not null default 0,
+  imported_moments integer not null default 0,
   imported_raw_records integer not null default 0,
   warnings_json text not null default '[]'
 );

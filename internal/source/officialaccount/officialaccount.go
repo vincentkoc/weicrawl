@@ -158,15 +158,16 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 		return result, err
 	}
 	return result, arc.InsertSyncRun(ctx, archive.SyncRun{
-		RunID:            runID,
-		Source:           result.Source,
-		ProfileID:        "official-account",
-		StartedAt:        started.Format(time.RFC3339),
-		FinishedAt:       time.Now().UTC().Format(time.RFC3339),
-		Status:           result.Status,
-		ImportedProfiles: 1,
-		ImportedMessages: 0,
-		Warnings:         result.Warnings,
+		RunID:               runID,
+		Source:              result.Source,
+		ProfileID:           "official-account",
+		StartedAt:           started.Format(time.RFC3339),
+		FinishedAt:          time.Now().UTC().Format(time.RFC3339),
+		Status:              result.Status,
+		ImportedProfiles:    1,
+		ImportedBizAccounts: result.Accounts,
+		ImportedArticles:    result.Articles,
+		Warnings:            result.Warnings,
 	})
 }
 
