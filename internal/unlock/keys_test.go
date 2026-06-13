@@ -65,6 +65,22 @@ func TestReadKeyManifestRejectsPathTraversal(t *testing.T) {
 	}
 }
 
+func TestReadKeyManifestAcceptsAbsoluteDBStoragePaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wechat_keys.json")
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	dbPath := filepath.Join(string(filepath.Separator), "tmp", "profile", "db_storage", "message", "message_0.db")
+	if err := os.WriteFile(path, []byte(`{"`+dbPath+`":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := ReadKeyManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Keys[dbPath] != key {
+		t.Fatalf("keys = %#v", manifest.Keys)
+	}
+}
+
 func TestReadKeyManifestRejectsBadKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wechat_keys.json")
 	if err := os.WriteFile(path, []byte(`{"message/message_0.db":"not-a-key"}`), 0o600); err != nil {
@@ -374,6 +390,39 @@ func TestCheckSnapshotKeysExpandsDefaultKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !check.Ready || !check.DefaultKey || check.KeyCount != 2 || len(check.Found) != 2 {
+		t.Fatalf("check = %#v", check)
+	}
+}
+
+func TestCheckSnapshotKeysResolvesAbsoluteDBStoragePaths(t *testing.T) {
+	root := t.TempDir()
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	snapshotRoot := filepath.Join(root, "snapshot")
+	snapshotDB := filepath.Join(snapshotRoot, "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(snapshotDB), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapshotDB, []byte("encrypted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	livePath := filepath.Join(root, "live", "db_storage", "message", "message_0.db")
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"`+livePath+`":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sqlcipher := filepath.Join(root, "sqlcipher")
+	if err := os.WriteFile(sqlcipher, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	check, err := CheckSnapshotKeys(DecryptOptions{
+		SnapshotDir:   snapshotRoot,
+		KeysPath:      keysPath,
+		SQLCipherPath: sqlcipher,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !check.Ready || check.KeyCount != 1 || len(check.Found) != 1 || check.Found[0].Database != "message/message_0.db" {
 		t.Fatalf("check = %#v", check)
 	}
 }

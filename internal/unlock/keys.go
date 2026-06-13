@@ -255,7 +255,7 @@ func readKeyManifestBytes(bytes []byte) (KeyManifest, error) {
 
 func readManifestKeyMap(keys map[string]string, raw map[string]any) error {
 	for key, value := range raw {
-		rel, err := cleanManifestRel(key)
+		rel, err := cleanManifestKeyPath(key)
 		if err != nil {
 			return err
 		}
@@ -266,6 +266,14 @@ func readManifestKeyMap(keys map[string]string, raw map[string]any) error {
 		keys[rel] = normalized
 	}
 	return nil
+}
+
+func cleanManifestKeyPath(path string) (string, error) {
+	clean := filepath.Clean(strings.TrimSpace(path))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid database path %q", path)
+	}
+	return clean, nil
 }
 
 func normalizeManifestKey(name string, value any) (string, error) {
@@ -379,7 +387,11 @@ func CheckSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
 
 func resolveSnapshotKeys(dbRoot string, manifest KeyManifest) (map[string]string, error) {
 	keys := map[string]string{}
-	for rel, key := range manifest.Keys {
+	for path, key := range manifest.Keys {
+		rel, err := resolveManifestDBPath(dbRoot, path)
+		if err != nil {
+			return nil, err
+		}
 		keys[rel] = key
 	}
 	if manifest.DefaultKey == "" {
@@ -403,6 +415,37 @@ func resolveSnapshotKeys(dbRoot string, manifest KeyManifest) (map[string]string
 		return nil
 	})
 	return keys, err
+}
+
+func resolveManifestDBPath(dbRoot, path string) (string, error) {
+	clean := filepath.Clean(strings.TrimSpace(path))
+	if clean == "." {
+		return "", fmt.Errorf("invalid database path %q", path)
+	}
+	if rel, ok := relAfterDBStorage(clean); ok {
+		return cleanManifestRel(rel)
+	}
+	if !filepath.IsAbs(clean) {
+		return cleanManifestRel(clean)
+	}
+	dbRootAbs, err := filepath.Abs(dbRoot)
+	if err != nil {
+		return "", err
+	}
+	if rel, err := filepath.Rel(dbRootAbs, clean); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+		return cleanManifestRel(rel)
+	}
+	return "", fmt.Errorf("absolute database path is not under copied db_storage: %s", clean)
+}
+
+func relAfterDBStorage(path string) (string, bool) {
+	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] == "db_storage" && i+1 < len(parts) {
+			return filepath.Join(parts[i+1:]...), true
+		}
+	}
+	return "", false
 }
 
 func FindSQLCipher(configured string) (string, error) {

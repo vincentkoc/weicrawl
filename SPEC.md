@@ -599,7 +599,10 @@ default key:
 
 Default-key expansion is limited to `.db` files under the copied snapshot's
 `db_storage` tree. Manifest database paths must be relative and must not escape
-the decrypted output root.
+the decrypted output root after resolution. Per-database keys may be emitted as
+snapshot-relative paths, `db_storage/...` paths, or absolute scanner paths that
+contain a `db_storage` segment; decrypt/import must resolve them to copied
+snapshot-relative paths before reading or writing files.
 
 `unlock scan-keys --execute --scan-out <path>` should convert a 64-hex key from
 the reviewed extractor's output into a `__default_key` manifest at `<path>`,

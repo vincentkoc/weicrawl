@@ -138,7 +138,10 @@ provide one profile key:
 ```
 
 The default key is applied to every `.db` file under the copied snapshot's
-`db_storage` tree. Per-database entries override it when needed.
+`db_storage` tree. Per-database entries override it when needed. Per-database
+keys may use snapshot-relative paths such as `message/message_0.db`, copied-root
+paths such as `db_storage/message/message_0.db`, or absolute paths that contain
+a `db_storage` segment; `weicrawl` resolves them back to the copied snapshot.
 
 `wechat_keys.json` and decrypted DBs are ignored by git.
 
