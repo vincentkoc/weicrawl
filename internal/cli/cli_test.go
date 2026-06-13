@@ -70,6 +70,9 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if !unlockReport["external_key_manifest_supported"].(bool) || unlockReport["external_key_manifest_persistent"].(bool) {
 		t.Fatalf("doctor unlock report = %#v", unlockReport)
 	}
+	if methods := unlockReport["configured_methods"].([]any); len(methods) != 0 {
+		t.Fatalf("doctor unlock methods = %#v", methods)
+	}
 	if check := doctorCheck(t, doctor, "fts_health"); !check["ok"].(bool) {
 		t.Fatalf("fts check = %#v", check)
 	}
@@ -78,6 +81,9 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	}
 	if check := doctorCheck(t, doctor, "source_db_encryption_probe"); int(check["encrypted_count"].(float64)) != 0 {
 		t.Fatalf("encryption check = %#v", check)
+	}
+	if check := doctorCheck(t, doctor, "key_info_discovery"); int(check["key_info_db_count"].(float64)) != 0 {
+		t.Fatalf("key info check = %#v", check)
 	}
 
 	code, out, errOut = runForTest("--json", "sync", "--profile", "wxid_fixture", "--include-media")
@@ -210,6 +216,9 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	}
 	if got := int(sourceStatus["database_count"].(float64)); got != 1 {
 		t.Fatalf("source database_count = %d, source=%#v", got, sourceStatus)
+	}
+	if got := int(sourceStatus["key_info_db_count"].(float64)); got != 0 {
+		t.Fatalf("source key_info_db_count = %d, source=%#v", got, sourceStatus)
 	}
 	if _, ok := sourceStatus["app_version"]; !ok {
 		t.Fatalf("source app_version missing: %#v", sourceStatus)

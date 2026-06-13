@@ -255,6 +255,7 @@ func (e env) runDoctor(args []string) error {
 		{"id": "profile_discovery", "ok": len(disc.ProfileRoots) > 0, "profiles": len(disc.ProfileRoots)},
 		{"id": "database_shards", "ok": disc.DatabaseCount > 0, "count": disc.DatabaseCount},
 		{"id": "source_db_encryption_probe", "ok": true, "encrypted_count": disc.EncryptedDBCount, "database_count": disc.DatabaseCount},
+		{"id": "key_info_discovery", "ok": true, "key_info_db_count": disc.KeyInfoDBCount},
 		{"id": "backup_discovery", "ok": true, "backup_dirs": len(disc.BackupDirs)},
 		{"id": "unlock_configured", "ok": len(unlockMethods) > 0, "methods": unlockMethods},
 		{"id": "unlock_key_manifest_supported", "ok": true, "method": "unlock desktop --keys <wechat_keys.json> --snapshot <copied-profile-root> --out <decrypted-dir>"},
@@ -320,7 +321,7 @@ func (e env) runDoctor(args []string) error {
 }
 
 func configuredUnlockMethods(cfg config.UnlockConfig) []string {
-	var methods []string
+	methods := []string{}
 	if cfg.AllowProcessInspect {
 		methods = append(methods, "process-inspect")
 	}
@@ -383,6 +384,7 @@ func (e env) runStatus() error {
 				"profile_count":            len(disc.ProfileRoots),
 				"database_count":           disc.DatabaseCount,
 				"encrypted_database_count": disc.EncryptedDBCount,
+				"key_info_db_count":        disc.KeyInfoDBCount,
 				"keep_source_snapshots":    e.loaded.Config.DesktopMacOS.KeepSourceSnapshots,
 				"keep_decrypted_snapshots": e.loaded.Config.DesktopMacOS.KeepDecryptedSnapshots,
 			},
