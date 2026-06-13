@@ -316,6 +316,24 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if hits := search["hits"].([]any); len(hits) < 2 {
 		t.Fatalf("jsonl search hits = %#v", hits)
 	}
+	for command, want := range map[string]int{
+		"chat-members":   1,
+		"message-parts":  1,
+		"message-events": 1,
+		"moments":        1,
+	} {
+		code, out, errOut = runForTest("--json", command)
+		if code != 0 {
+			t.Fatalf("%s code=%d stderr=%s stdout=%s", command, code, errOut, out)
+		}
+		var listed map[string]any
+		if err := json.Unmarshal(out.Bytes(), &listed); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(listed["values"].([]any)); got != want {
+			t.Fatalf("%s values = %d, payload=%#v", command, got, listed)
+		}
+	}
 	syncImportDB := filepath.Join(root, "sync-imported.db")
 	code, out, errOut = runForTest("--json", "--db", syncImportDB, "sync", "--source", "import", "--import-path", jsonlPath)
 	if code != 0 {
@@ -432,7 +450,7 @@ func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := payload["commands"].(map[string]any)
-	for _, name := range []string{"version", "init", "doctor", "metadata", "status", "sync", "unlock", "profiles", "contacts", "chats", "messages", "favorites", "articles", "media", "runs", "sql", "export", "snapshot", "import", "tui", "completion"} {
+	for _, name := range []string{"version", "init", "doctor", "metadata", "status", "sync", "unlock", "profiles", "contacts", "chats", "chat-members", "messages", "message-parts", "message-events", "favorites", "articles", "media", "moments", "raw-records", "runs", "sql", "export", "snapshot", "import", "tui", "completion"} {
 		if _, ok := commands[name]; !ok {
 			t.Fatalf("metadata command %q missing: %#v", name, commands)
 		}
@@ -707,6 +725,17 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	}
 	if got := int(payload["imported_raw_records"].(float64)); got != 1 {
 		t.Fatalf("imported_raw_records = %d, payload=%#v", got, payload)
+	}
+	code, out, errOut = runForTest("--json", "raw-records")
+	if code != 0 {
+		t.Fatalf("raw-records code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var rawRecords map[string]any
+	if err := json.Unmarshal(out.Bytes(), &rawRecords); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(rawRecords["values"].([]any)); got != 1 {
+		t.Fatalf("raw-records values = %d, payload=%#v", got, rawRecords)
 	}
 	code, out, errOut = runForTest("--json", "search", "native")
 	if code != 0 {

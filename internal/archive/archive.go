@@ -565,7 +565,7 @@ func (a *Archive) List(ctx context.Context, table string, limit int) (ckstore.Qu
 		limit = 100
 	}
 	switch table {
-	case "profiles", "contacts", "chats", "messages", "favorites", "biz_articles", "media_items", "sync_runs":
+	case "profiles", "contacts", "chats", "chat_members", "messages", "message_parts", "message_events", "favorites", "biz_articles", "media_items", "moments", "raw_records", "sync_runs":
 	default:
 		return ckstore.QueryResult{}, fmt.Errorf("unsupported list table %q", table)
 	}
