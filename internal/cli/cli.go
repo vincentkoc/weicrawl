@@ -414,9 +414,6 @@ func (e env) runSyncAll(arc *archive.Archive, opts syncOptions) error {
 			result.Errors = append(result.Errors, syncAllError{Source: source, Error: err.Error()})
 			return
 		}
-		if syncStatus(item) == "partial" && result.Status == "success" {
-			result.Status = "partial"
-		}
 		result.Results = append(result.Results, item)
 	}
 	if e.loaded.Config.DesktopMacOS.Enabled {
@@ -442,6 +439,7 @@ func (e env) runSyncAll(arc *archive.Archive, opts syncOptions) error {
 			return e.importJSONLResult(arc, config.Expand(opts.ImportPath))
 		})
 	}
+	result.Status = aggregateSyncStatus(result.Results, len(result.Errors))
 	if len(result.Results) == 0 {
 		if len(result.Errors) > 0 {
 			result.Status = "failed"
@@ -452,10 +450,41 @@ func (e env) runSyncAll(arc *archive.Archive, opts syncOptions) error {
 		}
 		result.Status = "skipped"
 		result.Warnings = append(result.Warnings, "no configured or explicitly selected sources ran")
-	} else if len(result.Errors) > 0 {
-		result.Status = "partial"
 	}
 	return e.write("sync", result)
+}
+
+func aggregateSyncStatus(results []any, errorCount int) string {
+	if errorCount > 0 {
+		if len(results) == 0 {
+			return "failed"
+		}
+		return "partial"
+	}
+	if len(results) == 0 {
+		return "skipped"
+	}
+	successes := 0
+	skipped := 0
+	for _, item := range results {
+		switch syncStatus(item) {
+		case "partial":
+			return "partial"
+		case "failed":
+			return "partial"
+		case "skipped":
+			skipped++
+		default:
+			successes++
+		}
+	}
+	if successes == 0 && skipped > 0 {
+		return "skipped"
+	}
+	if skipped > 0 {
+		return "partial"
+	}
+	return "success"
 }
 
 func syncStatus(value any) string {

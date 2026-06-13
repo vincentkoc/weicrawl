@@ -572,6 +572,52 @@ func TestCLISyncAllPropagatesPartialSourceStatus(t *testing.T) {
 	}
 }
 
+func TestCLISyncAllReportsSkippedWhenConfiguredSourcesSkip(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := filepath.Join(root, "config", "weicrawl", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("WEICRAWL_CONFIG", cfgPath)
+	t.Setenv("APP_ID_ENV", "")
+	t.Setenv("APP_SECRET_ENV", "")
+	configBody := fmt.Sprintf(`
+[archive]
+db_path = %q
+cache_dir = %q
+log_dir = %q
+
+[desktop_macos]
+enabled = false
+container_path = %q
+
+[official_account]
+enabled = true
+app_id_env = "APP_ID_ENV"
+app_secret_env = "APP_SECRET_ENV"
+`, filepath.Join(root, "weicrawl.db"), filepath.Join(root, "cache"), filepath.Join(root, "logs"), filepath.Join(root, "empty-container"))
+	if err := os.WriteFile(cfgPath, []byte(configBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runForTest("--json", "sync", "--source", "all")
+	if code != 0 {
+		t.Fatalf("sync all code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["status"] != "skipped" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	results := payload["results"].([]any)
+	if len(results) != 1 || results[0].(map[string]any)["status"] != "skipped" {
+		t.Fatalf("results = %#v", results)
+	}
+}
+
 func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")
