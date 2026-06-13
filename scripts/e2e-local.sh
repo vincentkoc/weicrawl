@@ -87,6 +87,16 @@ env -u WEICRAWL_WECHAT_APP_ID -u WEICRAWL_WECHAT_APP_SECRET \
 go run ./cmd/weicrawl --json status > "$tmpdir/status.json"
 go run ./cmd/weicrawl --json unlock status > "$tmpdir/unlock-status.json"
 go run ./cmd/weicrawl --json unlock scan-keys --allow-process-inspect > "$tmpdir/scan-plan.json"
+go run ./cmd/weicrawl --json search "e2e fixture" > "$tmpdir/search.json"
+go run ./cmd/weicrawl --json export --format jsonl --out "$tmpdir/archive.jsonl" > "$tmpdir/export-jsonl.json"
+go run ./cmd/weicrawl --json export --format markdown --out "$tmpdir/markdown" > "$tmpdir/export-markdown.json"
+go run ./cmd/weicrawl --json --db "$tmpdir/jsonl-import.db" init > "$tmpdir/jsonl-import-init.json"
+go run ./cmd/weicrawl --json --db "$tmpdir/jsonl-import.db" import --format jsonl "$tmpdir/archive.jsonl" > "$tmpdir/import-jsonl.json"
+go run ./cmd/weicrawl --json --db "$tmpdir/jsonl-import.db" search "e2e fixture" > "$tmpdir/search-jsonl-import.json"
+go run ./cmd/weicrawl --json snapshot create --out "$tmpdir/snapshot" > "$tmpdir/snapshot-create.json"
+go run ./cmd/weicrawl --json --db "$tmpdir/snapshot-import.db" init > "$tmpdir/snapshot-import-init.json"
+go run ./cmd/weicrawl --json --db "$tmpdir/snapshot-import.db" import "$tmpdir/snapshot" > "$tmpdir/import-snapshot.json"
+go run ./cmd/weicrawl --json --db "$tmpdir/snapshot-import.db" search "e2e fixture" > "$tmpdir/search-snapshot-import.json"
 go run ./cmd/weicrawl --json tui > "$tmpdir/tui.json"
 
 python3 - "$tmpdir" <<'PY'
@@ -120,6 +130,20 @@ status = payloads["status"]
 if status.get("control", {}).get("state") != "ok":
     raise SystemExit(f"status not ok: {status}")
 
+for name in ("search", "search-jsonl-import", "search-snapshot-import"):
+    hits = payloads[name].get("hits", [])
+    if not hits:
+        raise SystemExit(f"{name} returned no hits: {payloads[name]}")
+
+if payloads["export-jsonl"].get("rows", 0) <= 0:
+    raise SystemExit(f"jsonl export wrote no rows: {payloads['export-jsonl']}")
+if payloads["import-jsonl"].get("rows", 0) <= 0:
+    raise SystemExit(f"jsonl import wrote no rows: {payloads['import-jsonl']}")
+if not (root / "markdown" / "chat-1.md").exists():
+    raise SystemExit("markdown export did not write chat-1.md")
+if not (root / "snapshot" / "manifest.json").exists():
+    raise SystemExit("snapshot export did not write manifest.json")
+
 print(json.dumps({
     "sync": {
         "source": sync.get("source"),
@@ -133,6 +157,12 @@ print(json.dumps({
     "status": {
         "state": status.get("control", {}).get("state"),
         "warnings": len(status.get("warnings", [])),
+    },
+    "roundtrip": {
+        "jsonl_rows": payloads["import-jsonl"].get("rows"),
+        "search_hits": len(payloads["search"].get("hits", [])),
+        "jsonl_import_hits": len(payloads["search-jsonl-import"].get("hits", [])),
+        "snapshot_import_hits": len(payloads["search-snapshot-import"].get("hits", [])),
     },
 }, indent=2))
 PY
