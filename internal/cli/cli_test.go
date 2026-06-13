@@ -323,6 +323,18 @@ func TestUnlockDesktopDoesNotClaimAvailability(t *testing.T) {
 	}
 }
 
+func TestHelpListsAllGlobalFlags(t *testing.T) {
+	code, out, errOut := runForTest("help")
+	if code != 0 {
+		t.Fatalf("help code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	for _, flag := range []string{"--config", "--db", "--profile", "--json", "--quiet", "--verbose"} {
+		if !strings.Contains(out.String(), flag) {
+			t.Fatalf("help missing %s:\n%s", flag, out.String())
+		}
+	}
+}
+
 func TestOfficialAccountSyncSkipsWithoutCredentials(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))

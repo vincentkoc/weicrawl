@@ -1397,7 +1397,9 @@ global flags:
   --config <path>  config path
   --db <path>      archive db path
   --profile <id>   profile id or wxid
-  --json           JSON output`)
+  --json           JSON output
+  --quiet          suppress error output
+  --verbose        include extra diagnostics where available`)
 }
 
 func errString(err error) string {
