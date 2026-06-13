@@ -1151,6 +1151,15 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	if got := len(rawRecords["values"].([]any)); got != 1 {
 		t.Fatalf("raw-records values = %d, payload=%#v", got, rawRecords)
 	}
+	jsonlPath := filepath.Join(root, "native-archive.jsonl")
+	code, out, errOut = runForTest("--json", "export", "--format", "jsonl", "--out", jsonlPath)
+	if code != 0 {
+		t.Fatalf("native export jsonl code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	counts := readJSONLEntityCounts(t, jsonlPath)
+	if counts["raw_record"] != 1 {
+		t.Fatalf("native jsonl raw_record count = %d, counts=%#v", counts["raw_record"], counts)
+	}
 	code, out, errOut = runForTest("--json", "search", "decrypted shape")
 	if code != 0 {
 		t.Fatalf("search code=%d stderr=%s stdout=%s", code, errOut, out)

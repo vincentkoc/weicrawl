@@ -1379,6 +1379,7 @@ func exportQueries(scope string) ([]exportQuery, error) {
 		{Entity: "biz_account", Query: `select profile_id, account_id, display_name, raw_json, updated_at from biz_accounts order by profile_id, account_id`},
 		{Entity: "article", Query: `select profile_id, article_id, account_id, title, url, summary, published_at, raw_json, updated_at from biz_articles order by profile_id, coalesce(published_at,''), article_id`},
 		{Entity: "moment", Query: `select profile_id, moment_id, author_id, text, created_at, raw_json, updated_at from moments order by profile_id, coalesce(created_at,''), moment_id`},
+		{Entity: "raw_record", Query: `select id, profile_id, source_name, source_table, source_key, record_kind, payload_json, observed_at from raw_records order by profile_id, source_name, source_table, id`},
 	}
 	switch scope {
 	case "all":
@@ -1394,7 +1395,7 @@ func exportQueries(scope string) ([]exportQuery, error) {
 	case "moments":
 		return filterExportQueries(all, "moment"), nil
 	case "raw":
-		return []exportQuery{{Entity: "raw_record", Query: `select id, profile_id, source_name, source_table, source_key, record_kind, payload_json, observed_at from raw_records order by profile_id, source_name, source_table, id`}}, nil
+		return filterExportQueries(all, "raw_record"), nil
 	default:
 		return nil, fmt.Errorf("unsupported export scope %q", scope)
 	}
