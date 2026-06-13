@@ -34,6 +34,7 @@ type Result struct {
 	ImportedParts      int64    `json:"imported_message_parts"`
 	ImportedEvents     int64    `json:"imported_message_events"`
 	ImportedMedia      int64    `json:"imported_media"`
+	ImportedArticles   int64    `json:"imported_articles"`
 	ImportedFavorites  int64    `json:"imported_favorites"`
 	ImportedMoments    int64    `json:"imported_moments"`
 	ImportedRawRecords int64    `json:"imported_raw_records"`
@@ -75,6 +76,7 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 	result.ImportedParts = importResult.MessageParts
 	result.ImportedEvents = importResult.MessageEvents
 	result.ImportedMedia = importResult.Media
+	result.ImportedArticles = importResult.Articles
 	result.ImportedFavorites = importResult.Favorites
 	result.ImportedMoments = importResult.Moments
 	result.ImportedRawRecords = importResult.RawRecords

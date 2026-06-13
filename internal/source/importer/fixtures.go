@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -23,6 +24,7 @@ type Result struct {
 	MessageParts  int64 `json:"message_parts"`
 	MessageEvents int64 `json:"message_events"`
 	Media         int64 `json:"media"`
+	Articles      int64 `json:"articles"`
 	Favorites     int64 `json:"favorites"`
 	Moments       int64 `json:"moments"`
 	RawRecords    int64 `json:"raw_records"`
@@ -58,6 +60,7 @@ func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive
 		result.MessageParts += counts.MessageParts
 		result.MessageEvents += counts.MessageEvents
 		result.Media += counts.Media
+		result.Articles += counts.Articles
 		result.Favorites += counts.Favorites
 		result.Moments += counts.Moments
 		result.RawRecords += counts.RawRecords
@@ -447,12 +450,135 @@ func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, 
 				return result, err
 			}
 			result.Messages++
+			enriched, err := importNativeMessagePayload(ctx, arc, msg, localType, content)
+			if err != nil {
+				_ = msgRows.Close()
+				return result, err
+			}
+			result.add(enriched)
 		}
 		if err := msgRows.Close(); err != nil {
 			return result, err
 		}
 	}
 	return result, nil
+}
+
+type richMessagePayload struct {
+	Title       string
+	Description string
+	URL         string
+	AppName     string
+	MediaRef    string
+}
+
+func importNativeMessagePayload(ctx context.Context, arc *archive.Archive, msg archive.Message, localType int64, content string) (Result, error) {
+	var result Result
+	payload := extractRichMessagePayload(content)
+	if msg.MessageType == "link" && (payload.Title != "" || payload.URL != "") {
+		raw := map[string]any{"source": "native-message-payload", "message_id": msg.MessageID, "app_name": payload.AppName}
+		rawJSON, _ := json.Marshal(raw)
+		articleID := stableID("native-article", msg.ProfileID, msg.MessageID, payload.URL, payload.Title)
+		if err := arc.UpsertArticle(ctx, archive.Article{
+			ProfileID:   msg.ProfileID,
+			ArticleID:   articleID,
+			AccountID:   msg.ChatID,
+			Title:       firstNonEmpty(payload.Title, payload.URL, "[link]"),
+			URL:         payload.URL,
+			Summary:     payload.Description,
+			PublishedAt: msg.SentAt,
+			RawJSON:     string(rawJSON),
+		}); err != nil {
+			return result, err
+		}
+		result.Articles++
+		if err := arc.UpsertMessagePart(ctx, archive.MessagePart{
+			ProfileID: msg.ProfileID,
+			MessageID: msg.MessageID,
+			PartIndex: 0,
+			Kind:      "link",
+			Text:      firstNonEmpty(payload.Title, payload.Description),
+			URL:       payload.URL,
+			RawJSON:   string(rawJSON),
+		}); err != nil {
+			return result, err
+		}
+		result.MessageParts++
+	}
+	mediaRef := firstNonEmpty(payload.MediaRef, payload.URL)
+	if mediaRef != "" && msg.MessageType != "text" && msg.MessageType != "link" && msg.MessageType != "unsupported" {
+		raw := map[string]any{"source": "native-message-payload", "message_id": msg.MessageID, "local_type": localType}
+		rawJSON, _ := json.Marshal(raw)
+		mediaID := stableID("native-media", msg.ProfileID, msg.MessageID, mediaRef)
+		if err := arc.UpsertMedia(ctx, archive.MediaItem{
+			ProfileID:  msg.ProfileID,
+			MediaID:    mediaID,
+			Kind:       msg.MessageType,
+			SourcePath: mediaRef,
+			RawJSON:    string(rawJSON),
+		}); err != nil {
+			return result, err
+		}
+		result.Media++
+		if err := arc.UpsertMessagePart(ctx, archive.MessagePart{
+			ProfileID: msg.ProfileID,
+			MessageID: msg.MessageID,
+			PartIndex: 0,
+			Kind:      msg.MessageType,
+			MediaID:   mediaID,
+			URL:       mediaRef,
+			RawJSON:   string(rawJSON),
+		}); err != nil {
+			return result, err
+		}
+		result.MessageParts++
+	}
+	return result, nil
+}
+
+func extractRichMessagePayload(content string) richMessagePayload {
+	var payload richMessagePayload
+	if !strings.Contains(content, "<") {
+		return payload
+	}
+	values := map[string]string{}
+	decoder := xml.NewDecoder(strings.NewReader(content))
+	decoder.Strict = false
+	var current string
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := token.(type) {
+		case xml.StartElement:
+			current = strings.ToLower(t.Name.Local)
+			for _, attr := range t.Attr {
+				name := strings.ToLower(attr.Name.Local)
+				if values[name] == "" {
+					values[name] = strings.TrimSpace(attr.Value)
+				}
+			}
+		case xml.CharData:
+			if current == "" {
+				continue
+			}
+			value := strings.TrimSpace(string(t))
+			if value != "" && values[current] == "" {
+				values[current] = value
+			}
+		case xml.EndElement:
+			if strings.EqualFold(current, t.Name.Local) {
+				current = ""
+			}
+		}
+	}
+	payload.Title = values["title"]
+	payload.Description = firstNonEmpty(values["des"], values["description"])
+	payload.URL = firstNonEmpty(values["url"], values["lowurl"])
+	payload.AppName = values["appname"]
+	payload.MediaRef = firstNonEmpty(values["cdnthumburl"], values["thumburl"], values["cdnvideourl"], values["cdnurl"], values["fileid"], values["md5"])
+	return payload
 }
 
 func tableSet(ctx context.Context, db *sql.DB) (map[string]bool, error) {
@@ -651,6 +777,11 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func stableID(prefix string, values ...string) string {
+	hash := md5.Sum([]byte(strings.Join(values, "\x00")))
+	return prefix + ":" + hex.EncodeToString(hash[:])
+}
+
 func (r *Result) add(other Result) {
 	r.Contacts += other.Contacts
 	r.Chats += other.Chats
@@ -658,6 +789,7 @@ func (r *Result) add(other Result) {
 	r.MessageParts += other.MessageParts
 	r.MessageEvents += other.MessageEvents
 	r.Media += other.Media
+	r.Articles += other.Articles
 	r.Favorites += other.Favorites
 	r.Moments += other.Moments
 	r.RawRecords += other.RawRecords

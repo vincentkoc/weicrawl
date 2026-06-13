@@ -803,11 +803,42 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	if got := int(payload["imported_contacts"].(float64)); got != 1 {
 		t.Fatalf("imported_contacts = %d, payload=%#v", got, payload)
 	}
-	if got := int(payload["imported_messages"].(float64)); got != 1 {
+	if got := int(payload["imported_messages"].(float64)); got != 3 {
 		t.Fatalf("imported_messages = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_message_parts"].(float64)); got != 2 {
+		t.Fatalf("imported_message_parts = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_media"].(float64)); got != 1 {
+		t.Fatalf("imported_media = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_articles"].(float64)); got != 1 {
+		t.Fatalf("imported_articles = %d, payload=%#v", got, payload)
 	}
 	if got := int(payload["imported_raw_records"].(float64)); got != 1 {
 		t.Fatalf("imported_raw_records = %d, payload=%#v", got, payload)
+	}
+	code, out, errOut = runForTest("--json", "articles")
+	if code != 0 {
+		t.Fatalf("articles code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var articles map[string]any
+	if err := json.Unmarshal(out.Bytes(), &articles); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(articles["values"].([]any)); got != 1 {
+		t.Fatalf("articles values = %d, payload=%#v", got, articles)
+	}
+	code, out, errOut = runForTest("--json", "media")
+	if code != 0 {
+		t.Fatalf("media code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var media map[string]any
+	if err := json.Unmarshal(out.Bytes(), &media); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(media["values"].([]any)); got != 1 {
+		t.Fatalf("media values = %d, payload=%#v", got, media)
 	}
 	code, out, errOut = runForTest("--json", "raw-records")
 	if code != 0 {
@@ -820,7 +851,7 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	if got := len(rawRecords["values"].([]any)); got != 1 {
 		t.Fatalf("raw-records values = %d, payload=%#v", got, rawRecords)
 	}
-	code, out, errOut = runForTest("--json", "search", "native")
+	code, out, errOut = runForTest("--json", "search", "decrypted shape")
 	if code != 0 {
 		t.Fatalf("search code=%d stderr=%s stdout=%s", code, errOut, out)
 	}
@@ -854,8 +885,14 @@ func TestCLISyncDecryptedDir(t *testing.T) {
 	if payload["source"] != "desktop-macos-decrypted" {
 		t.Fatalf("payload = %#v", payload)
 	}
-	if got := int(payload["imported_messages"].(float64)); got != 1 {
+	if got := int(payload["imported_messages"].(float64)); got != 3 {
 		t.Fatalf("imported_messages = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_articles"].(float64)); got != 1 {
+		t.Fatalf("imported_articles = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_media"].(float64)); got != 1 {
+		t.Fatalf("imported_media = %d, payload=%#v", got, payload)
 	}
 	code, out, errOut = runForTest("--json", "sync", "--source", "desktop-macos", "--profile", "profile-decrypted", "--decrypted-dir", decrypted, "--keep-decrypted-snapshot")
 	if code != 0 {
@@ -920,8 +957,14 @@ func TestCLIUnlockDecryptThenSyncEncryptedFixture(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if got := int(payload["imported_messages"].(float64)); got != 1 {
+	if got := int(payload["imported_messages"].(float64)); got != 3 {
 		t.Fatalf("imported_messages = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_articles"].(float64)); got != 1 {
+		t.Fatalf("imported_articles = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_media"].(float64)); got != 1 {
+		t.Fatalf("imported_media = %d, payload=%#v", got, payload)
 	}
 }
 
@@ -1080,9 +1123,16 @@ insert into Name2Id values(?);`, username)
 		t.Fatal(err)
 	}
 	_, err = db.Exec(`create table "` + table + `"(local_id integer, local_type integer, create_time integer, real_sender_id text, message_content text, source text);
-insert into "` + table + `" values(7, 1, 1781323200, 'alice', 'native hello from decrypted shape', '0');
 create table NativeExtra(id text, body text);
 insert into NativeExtra values('extra-1', 'preserve me');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkXML := `<msg><appmsg><title>Native launch post</title><des>Rich link summary</des><url>https://example.invalid/native</url><appname>WeChat</appname></appmsg></msg>`
+	imageXML := `<msg><img cdnthumburl="https://example.invalid/native-thumb.jpg"></img></msg>`
+	_, err = db.Exec(`insert into "`+table+`" values(7, 1, 1781323200, 'alice', 'native hello from decrypted shape', '0');
+insert into "`+table+`" values(8, 49, 1781323300, 'alice', ?, '0');
+insert into "`+table+`" values(9, 3, 1781323400, 'alice', ?, '0');`, linkXML, imageXML)
 	if err != nil {
 		t.Fatal(err)
 	}
