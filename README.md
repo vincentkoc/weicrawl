@@ -182,5 +182,20 @@ GOWORK=off go vet ./...
 GOWORK=off go test -count=1 ./...
 ```
 
+For the local e2e gate plus live-safe CLI smoke:
+
+```bash
+./scripts/e2e-local.sh
+```
+
+To prove a real copied-snapshot unlock without reading live WeChat files, pass
+an explicit reviewed manifest and copied snapshot:
+
+```bash
+WEICRAWL_LIVE_KEYS=./wechat_keys.json \
+WEICRAWL_LIVE_SNAPSHOT=/path/to/copied/profile \
+./scripts/e2e-local.sh
+```
+
 Tests use temp homes and synthetic SQLite fixtures only. They must not read or
 mutate the operator's live WeChat container.
