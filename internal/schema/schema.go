@@ -180,6 +180,7 @@ create table if not exists sync_runs (
   imported_chats integer not null default 0,
   imported_messages integer not null default 0,
   imported_media integer not null default 0,
+  imported_raw_records integer not null default 0,
   warnings_json text not null default '[]'
 );
 

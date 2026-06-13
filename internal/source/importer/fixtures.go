@@ -17,10 +17,11 @@ import (
 )
 
 type Result struct {
-	Contacts int64 `json:"contacts"`
-	Chats    int64 `json:"chats"`
-	Messages int64 `json:"messages"`
-	Media    int64 `json:"media"`
+	Contacts   int64 `json:"contacts"`
+	Chats      int64 `json:"chats"`
+	Messages   int64 `json:"messages"`
+	Media      int64 `json:"media"`
+	RawRecords int64 `json:"raw_records"`
 }
 
 type File struct {
@@ -43,6 +44,7 @@ func ImportFixtureDatabases(ctx context.Context, arc *archive.Archive, profileID
 		result.Chats += counts.Chats
 		result.Messages += counts.Messages
 		result.Media += counts.Media
+		result.RawRecords += counts.RawRecords
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %v", file.Role, err))
 		}
@@ -170,6 +172,11 @@ func importNativeDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profi
 		}
 		result.add(counts)
 	}
+	n, err := importRawUnsupportedTables(ctx, arc, db, profileID, file, tables)
+	if err != nil {
+		return result, err
+	}
+	result.RawRecords += n
 	return result, nil
 }
 
@@ -345,6 +352,74 @@ func tableSet(ctx context.Context, db *sql.DB) (map[string]bool, error) {
 	return out, rows.Err()
 }
 
+func importRawUnsupportedTables(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, tables map[string]bool) (int64, error) {
+	var n int64
+	for table := range tables {
+		if skipRawTable(table) {
+			continue
+		}
+		rows, err := db.QueryContext(ctx, `select * from `+quoteIdent(table))
+		if err != nil {
+			continue
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			_ = rows.Close()
+			return n, err
+		}
+		rowIndex := int64(0)
+		for rows.Next() {
+			values := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range values {
+				ptrs[i] = &values[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				_ = rows.Close()
+				return n, err
+			}
+			payload := map[string]any{"source_db": filepath.Base(file.Path), "source_role": file.Role}
+			for i, col := range cols {
+				payload[col] = normalizeDBValue(values[i])
+			}
+			key := file.Role + ":" + table + ":" + strconv.FormatInt(rowIndex, 10)
+			if err := arc.InsertRawRecord(ctx, profileID, file.Role, table, key, "unsupported", payload); err != nil {
+				_ = rows.Close()
+				return n, err
+			}
+			rowIndex++
+			n++
+		}
+		if err := rows.Close(); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+func skipRawTable(table string) bool {
+	if table == "sqlite_sequence" ||
+		table == "contact" ||
+		table == "stranger" ||
+		table == "SessionTable" ||
+		table == "Name2Id" ||
+		strings.HasPrefix(table, "Msg_") ||
+		strings.HasPrefix(table, "weicrawl_fixture_") ||
+		strings.Contains(table, "_fts") {
+		return true
+	}
+	return false
+}
+
+func normalizeDBValue(value any) any {
+	switch v := value.(type) {
+	case []byte:
+		return string(v)
+	default:
+		return v
+	}
+}
+
 func allTableColumns(ctx context.Context, db *sql.DB) (map[string]map[string]bool, error) {
 	tables, err := tableSet(ctx, db)
 	if err != nil {
@@ -448,6 +523,7 @@ func (r *Result) add(other Result) {
 	r.Chats += other.Chats
 	r.Messages += other.Messages
 	r.Media += other.Media
+	r.RawRecords += other.RawRecords
 }
 
 func quoteIdent(name string) string {

@@ -39,22 +39,23 @@ type Status struct {
 }
 
 type SyncRun struct {
-	RunID            string   `json:"run_id"`
-	Source           string   `json:"source"`
-	ProfileID        string   `json:"profile_id,omitempty"`
-	StartedAt        string   `json:"started_at"`
-	FinishedAt       string   `json:"finished_at,omitempty"`
-	Status           string   `json:"status"`
-	AppVersion       string   `json:"app_version,omitempty"`
-	SourceRoot       string   `json:"source_root,omitempty"`
-	SnapshotPath     string   `json:"snapshot_path,omitempty"`
-	SourceDBCount    int64    `json:"source_db_count"`
-	ImportedProfiles int64    `json:"imported_profiles"`
-	ImportedContacts int64    `json:"imported_contacts"`
-	ImportedChats    int64    `json:"imported_chats"`
-	ImportedMessages int64    `json:"imported_messages"`
-	ImportedMedia    int64    `json:"imported_media"`
-	Warnings         []string `json:"warnings,omitempty"`
+	RunID              string   `json:"run_id"`
+	Source             string   `json:"source"`
+	ProfileID          string   `json:"profile_id,omitempty"`
+	StartedAt          string   `json:"started_at"`
+	FinishedAt         string   `json:"finished_at,omitempty"`
+	Status             string   `json:"status"`
+	AppVersion         string   `json:"app_version,omitempty"`
+	SourceRoot         string   `json:"source_root,omitempty"`
+	SnapshotPath       string   `json:"snapshot_path,omitempty"`
+	SourceDBCount      int64    `json:"source_db_count"`
+	ImportedProfiles   int64    `json:"imported_profiles"`
+	ImportedContacts   int64    `json:"imported_contacts"`
+	ImportedChats      int64    `json:"imported_chats"`
+	ImportedMessages   int64    `json:"imported_messages"`
+	ImportedMedia      int64    `json:"imported_media"`
+	ImportedRawRecords int64    `json:"imported_raw_records"`
+	Warnings           []string `json:"warnings,omitempty"`
 }
 
 type Message struct {
@@ -115,6 +116,7 @@ func Open(ctx context.Context, path string) (*Archive, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, _ = st.DB().ExecContext(ctx, `alter table sync_runs add column imported_raw_records integer not null default 0`)
 	return &Archive{store: st}, nil
 }
 
@@ -206,7 +208,7 @@ func (a *Archive) Status(ctx context.Context) (Status, error) {
 }
 
 func (a *Archive) LastSyncRun(ctx context.Context) (*SyncRun, error) {
-	rows, err := a.store.DB().QueryContext(ctx, `select run_id, source, coalesce(profile_id,''), started_at, coalesce(finished_at,''), status, coalesce(app_version,''), coalesce(source_root,''), coalesce(snapshot_path,''), source_db_count, imported_profiles, imported_contacts, imported_chats, imported_messages, imported_media, warnings_json from sync_runs order by started_at desc limit 1`)
+	rows, err := a.store.DB().QueryContext(ctx, `select run_id, source, coalesce(profile_id,''), started_at, coalesce(finished_at,''), status, coalesce(app_version,''), coalesce(source_root,''), coalesce(snapshot_path,''), source_db_count, imported_profiles, imported_contacts, imported_chats, imported_messages, imported_media, imported_raw_records, warnings_json from sync_runs order by started_at desc limit 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -223,8 +225,8 @@ func (a *Archive) LastSyncRun(ctx context.Context) (*SyncRun, error) {
 
 func (a *Archive) InsertSyncRun(ctx context.Context, run SyncRun) error {
 	warnings, _ := json.Marshal(run.Warnings)
-	_, err := a.store.DB().ExecContext(ctx, `insert or replace into sync_runs(run_id, source, profile_id, started_at, finished_at, status, app_version, source_root, snapshot_path, source_db_count, imported_profiles, imported_contacts, imported_chats, imported_messages, imported_media, warnings_json) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		run.RunID, run.Source, nullEmpty(run.ProfileID), run.StartedAt, nullEmpty(run.FinishedAt), run.Status, nullEmpty(run.AppVersion), nullEmpty(run.SourceRoot), nullEmpty(run.SnapshotPath), run.SourceDBCount, run.ImportedProfiles, run.ImportedContacts, run.ImportedChats, run.ImportedMessages, run.ImportedMedia, string(warnings))
+	_, err := a.store.DB().ExecContext(ctx, `insert or replace into sync_runs(run_id, source, profile_id, started_at, finished_at, status, app_version, source_root, snapshot_path, source_db_count, imported_profiles, imported_contacts, imported_chats, imported_messages, imported_media, imported_raw_records, warnings_json) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		run.RunID, run.Source, nullEmpty(run.ProfileID), run.StartedAt, nullEmpty(run.FinishedAt), run.Status, nullEmpty(run.AppVersion), nullEmpty(run.SourceRoot), nullEmpty(run.SnapshotPath), run.SourceDBCount, run.ImportedProfiles, run.ImportedContacts, run.ImportedChats, run.ImportedMessages, run.ImportedMedia, run.ImportedRawRecords, string(warnings))
 	return err
 }
 
@@ -290,6 +292,12 @@ func (a *Archive) UpsertArticle(ctx context.Context, article Article) error {
 	}
 	_, err = a.store.DB().ExecContext(ctx, `insert into article_fts(rowid, profile_id, article_id, account_id, body) values((select rowid from biz_articles where profile_id=? and article_id=?), ?, ?, ?, ?)`,
 		article.ProfileID, article.ArticleID, article.ProfileID, article.ArticleID, nullEmpty(article.AccountID), NormalizeText(article.Title+" "+article.Summary))
+	return err
+}
+
+func (a *Archive) InsertRawRecord(ctx context.Context, profileID, sourceName, sourceTable, sourceKey, recordKind string, payload any) error {
+	_, err := a.store.DB().ExecContext(ctx, `insert into raw_records(profile_id, source_name, source_table, source_key, record_kind, payload_json, observed_at) values(?,?,?,?,?,?,?)`,
+		profileID, sourceName, sourceTable, sourceKey, defaultString(recordKind, "unsupported"), marshalRaw(payload), time.Now().UTC().Format(time.RFC3339))
 	return err
 }
 
@@ -380,7 +388,7 @@ func (a *Archive) groupCounts(ctx context.Context, query string) (map[string]int
 func scanRun(rows interface{ Scan(...any) error }) (SyncRun, error) {
 	var run SyncRun
 	var warnings string
-	err := rows.Scan(&run.RunID, &run.Source, &run.ProfileID, &run.StartedAt, &run.FinishedAt, &run.Status, &run.AppVersion, &run.SourceRoot, &run.SnapshotPath, &run.SourceDBCount, &run.ImportedProfiles, &run.ImportedContacts, &run.ImportedChats, &run.ImportedMessages, &run.ImportedMedia, &warnings)
+	err := rows.Scan(&run.RunID, &run.Source, &run.ProfileID, &run.StartedAt, &run.FinishedAt, &run.Status, &run.AppVersion, &run.SourceRoot, &run.SnapshotPath, &run.SourceDBCount, &run.ImportedProfiles, &run.ImportedContacts, &run.ImportedChats, &run.ImportedMessages, &run.ImportedMedia, &run.ImportedRawRecords, &warnings)
 	if err != nil {
 		return run, err
 	}

@@ -46,17 +46,18 @@ type SnapshotFile struct {
 }
 
 type SyncResult struct {
-	RunID            string   `json:"run_id"`
-	ProfileID        string   `json:"profile_id,omitempty"`
-	Source           string   `json:"source"`
-	SnapshotPath     string   `json:"snapshot_path,omitempty"`
-	SourceDBCount    int      `json:"source_db_count"`
-	ImportedProfiles int64    `json:"imported_profiles"`
-	ImportedContacts int64    `json:"imported_contacts"`
-	ImportedChats    int64    `json:"imported_chats"`
-	ImportedMessages int64    `json:"imported_messages"`
-	ImportedMedia    int64    `json:"imported_media"`
-	Warnings         []string `json:"warnings,omitempty"`
+	RunID              string   `json:"run_id"`
+	ProfileID          string   `json:"profile_id,omitempty"`
+	Source             string   `json:"source"`
+	SnapshotPath       string   `json:"snapshot_path,omitempty"`
+	SourceDBCount      int      `json:"source_db_count"`
+	ImportedProfiles   int64    `json:"imported_profiles"`
+	ImportedContacts   int64    `json:"imported_contacts"`
+	ImportedChats      int64    `json:"imported_chats"`
+	ImportedMessages   int64    `json:"imported_messages"`
+	ImportedMedia      int64    `json:"imported_media"`
+	ImportedRawRecords int64    `json:"imported_raw_records"`
+	Warnings           []string `json:"warnings,omitempty"`
 }
 
 func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error) {
@@ -160,6 +161,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 	result.ImportedChats = importResult.Chats
 	result.ImportedMessages = importResult.Messages
 	result.ImportedMedia = importResult.Media
+	result.ImportedRawRecords = importResult.RawRecords
 	mediaCount, mediaErr := ImportMediaMetadata(ctx, arc, snap.ProfileID, snap.MediaDirs)
 	result.ImportedMedia += mediaCount
 	if mediaErr != nil {
@@ -179,22 +181,23 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 	}
 	finished := time.Now().UTC()
 	if err := arc.InsertSyncRun(ctx, archive.SyncRun{
-		RunID:            snap.RunID,
-		Source:           "desktop-macos",
-		ProfileID:        snap.ProfileID,
-		StartedAt:        started.Format(time.RFC3339),
-		FinishedAt:       finished.Format(time.RFC3339),
-		Status:           status,
-		AppVersion:       opts.AppVersion,
-		SourceRoot:       opts.Profile.Root,
-		SnapshotPath:     snap.Root,
-		SourceDBCount:    int64(len(snap.DatabaseFiles)),
-		ImportedProfiles: result.ImportedProfiles,
-		ImportedContacts: result.ImportedContacts,
-		ImportedChats:    result.ImportedChats,
-		ImportedMessages: result.ImportedMessages,
-		ImportedMedia:    result.ImportedMedia,
-		Warnings:         result.Warnings,
+		RunID:              snap.RunID,
+		Source:             "desktop-macos",
+		ProfileID:          snap.ProfileID,
+		StartedAt:          started.Format(time.RFC3339),
+		FinishedAt:         finished.Format(time.RFC3339),
+		Status:             status,
+		AppVersion:         opts.AppVersion,
+		SourceRoot:         opts.Profile.Root,
+		SnapshotPath:       snap.Root,
+		SourceDBCount:      int64(len(snap.DatabaseFiles)),
+		ImportedProfiles:   result.ImportedProfiles,
+		ImportedContacts:   result.ImportedContacts,
+		ImportedChats:      result.ImportedChats,
+		ImportedMessages:   result.ImportedMessages,
+		ImportedMedia:      result.ImportedMedia,
+		ImportedRawRecords: result.ImportedRawRecords,
+		Warnings:           result.Warnings,
 	}); err != nil {
 		return result, err
 	}
@@ -231,6 +234,7 @@ func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID
 	result.ImportedChats = importResult.Chats
 	result.ImportedMessages = importResult.Messages
 	result.ImportedMedia = importResult.Media
+	result.ImportedRawRecords = importResult.RawRecords
 	result.Warnings = append(result.Warnings, warnings...)
 	status := "success"
 	if err != nil {
@@ -245,22 +249,23 @@ func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID
 		result.Warnings = append(result.Warnings, "decrypted DBs were readable but no supported WeChat message tables were found")
 	}
 	if err := arc.InsertSyncRun(ctx, archive.SyncRun{
-		RunID:            runID,
-		Source:           result.Source,
-		ProfileID:        profileID,
-		StartedAt:        started.Format(time.RFC3339),
-		FinishedAt:       time.Now().UTC().Format(time.RFC3339),
-		Status:           status,
-		AppVersion:       appVersion,
-		SourceRoot:       decryptedDir,
-		SnapshotPath:     decryptedDir,
-		SourceDBCount:    int64(len(files)),
-		ImportedProfiles: result.ImportedProfiles,
-		ImportedContacts: result.ImportedContacts,
-		ImportedChats:    result.ImportedChats,
-		ImportedMessages: result.ImportedMessages,
-		ImportedMedia:    result.ImportedMedia,
-		Warnings:         result.Warnings,
+		RunID:              runID,
+		Source:             result.Source,
+		ProfileID:          profileID,
+		StartedAt:          started.Format(time.RFC3339),
+		FinishedAt:         time.Now().UTC().Format(time.RFC3339),
+		Status:             status,
+		AppVersion:         appVersion,
+		SourceRoot:         decryptedDir,
+		SnapshotPath:       decryptedDir,
+		SourceDBCount:      int64(len(files)),
+		ImportedProfiles:   result.ImportedProfiles,
+		ImportedContacts:   result.ImportedContacts,
+		ImportedChats:      result.ImportedChats,
+		ImportedMessages:   result.ImportedMessages,
+		ImportedMedia:      result.ImportedMedia,
+		ImportedRawRecords: result.ImportedRawRecords,
+		Warnings:           result.Warnings,
 	}); err != nil {
 		return result, err
 	}

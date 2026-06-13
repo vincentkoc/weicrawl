@@ -218,6 +218,9 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	if got := int(payload["imported_messages"].(float64)); got != 1 {
 		t.Fatalf("imported_messages = %d, payload=%#v", got, payload)
 	}
+	if got := int(payload["imported_raw_records"].(float64)); got != 1 {
+		t.Fatalf("imported_raw_records = %d, payload=%#v", got, payload)
+	}
 	code, out, errOut = runForTest("--json", "search", "native")
 	if code != 0 {
 		t.Fatalf("search code=%d stderr=%s stdout=%s", code, errOut, out)
@@ -297,7 +300,9 @@ insert into Name2Id values(?);`, username)
 		t.Fatal(err)
 	}
 	_, err = db.Exec(`create table "` + table + `"(local_id integer, local_type integer, create_time integer, real_sender_id text, message_content text, source text);
-insert into "` + table + `" values(7, 1, 1781323200, 'alice', 'native hello from decrypted shape', '0');`)
+insert into "` + table + `" values(7, 1, 1781323200, 'alice', 'native hello from decrypted shape', '0');
+create table NativeExtra(id text, body text);
+insert into NativeExtra values('extra-1', 'preserve me');`)
 	if err != nil {
 		t.Fatal(err)
 	}
