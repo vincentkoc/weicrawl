@@ -437,6 +437,43 @@ func TestCLISyncAllAggregatesConfiguredAndExplicitSources(t *testing.T) {
 	}
 }
 
+func TestCLISyncDesktopMarksEncryptedLikeDBPartial(t *testing.T) {
+	root := t.TempDir()
+	configRoot := filepath.Join(root, "config")
+	cfgPath := filepath.Join(configRoot, "weicrawl", "config.toml")
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("WEICRAWL_CONFIG", cfgPath)
+
+	container := filepath.Join(root, "WeChatContainer")
+	dbPath := filepath.Join(container, "Data", "Documents", "xwechat_files", "wxid_locked_abcd", "db_storage", "message", "message_0.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dbPath, []byte("encrypted-ish"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runForTest("--json", "init")
+	if code != 0 {
+		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	patchConfigPath(t, cfgPath, container)
+	code, out, errOut = runForTest("--json", "sync", "--profile", "wxid_locked")
+	if code != 0 {
+		t.Fatalf("sync code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["status"] != "partial" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	if !strings.Contains(fmt.Sprint(payload["warnings"]), "encrypted or unsupported") {
+		t.Fatalf("warnings = %#v", payload["warnings"])
+	}
+}
+
 func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")

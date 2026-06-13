@@ -49,6 +49,7 @@ type SyncResult struct {
 	RunID              string   `json:"run_id"`
 	ProfileID          string   `json:"profile_id,omitempty"`
 	Source             string   `json:"source"`
+	Status             string   `json:"status"`
 	SnapshotPath       string   `json:"snapshot_path,omitempty"`
 	SourceDBCount      int      `json:"source_db_count"`
 	ImportedProfiles   int64    `json:"imported_profiles"`
@@ -149,6 +150,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 		if result.RunID == "" {
 			result.RunID = "sync-" + started.Format("20060102T150405.000000000Z")
 		}
+		result.Status = "failed"
 		_ = arc.InsertSyncRun(ctx, archive.SyncRun{RunID: result.RunID, Source: "desktop-macos", ProfileID: opts.Profile.ProfileID, StartedAt: started.Format(time.RFC3339), FinishedAt: time.Now().UTC().Format(time.RFC3339), Status: "failed", AppVersion: opts.AppVersion, SourceRoot: opts.Profile.Root, Warnings: []string{err.Error()}})
 		return result, err
 	}
@@ -185,8 +187,10 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 		status = "partial"
 	}
 	if len(snap.DatabaseFiles) > 0 && result.ImportedMessages == 0 {
+		status = "partial"
 		result.Warnings = append(result.Warnings, "no readable supported message tables were imported; source DBs may be encrypted or unsupported")
 	}
+	result.Status = status
 	finished := time.Now().UTC()
 	if err := arc.InsertSyncRun(ctx, archive.SyncRun{
 		RunID:              snap.RunID,
@@ -258,8 +262,10 @@ func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID
 		result.Warnings = append(result.Warnings, "no decrypted .db files found")
 	}
 	if len(files) > 0 && result.ImportedMessages == 0 {
+		status = "partial"
 		result.Warnings = append(result.Warnings, "decrypted DBs were readable but no supported WeChat message tables were found")
 	}
+	result.Status = status
 	if err := arc.InsertSyncRun(ctx, archive.SyncRun{
 		RunID:              runID,
 		Source:             result.Source,
