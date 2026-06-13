@@ -414,6 +414,9 @@ func (e env) runSyncAll(arc *archive.Archive, opts syncOptions) error {
 			result.Errors = append(result.Errors, syncAllError{Source: source, Error: err.Error()})
 			return
 		}
+		if syncStatus(item) == "partial" && result.Status == "success" {
+			result.Status = "partial"
+		}
 		result.Results = append(result.Results, item)
 	}
 	if e.loaded.Config.DesktopMacOS.Enabled {
@@ -453,6 +456,20 @@ func (e env) runSyncAll(arc *archive.Archive, opts syncOptions) error {
 		result.Status = "partial"
 	}
 	return e.write("sync", result)
+}
+
+func syncStatus(value any) string {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(bytes, &payload); err != nil {
+		return ""
+	}
+	return payload.Status
 }
 
 func (e env) syncOfficial(arc *archive.Archive) (officialaccount.Result, error) {
