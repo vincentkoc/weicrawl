@@ -147,6 +147,8 @@ func (e env) run(args []string) error {
 		return e.runList("message_events", rest)
 	case "favorites":
 		return e.runList("favorites", rest)
+	case "biz-accounts":
+		return e.runList("biz_accounts", rest)
 	case "articles":
 		return e.runList("biz_articles", rest)
 	case "media":
@@ -271,6 +273,7 @@ func (e env) runStatus() error {
 		control.NewCount("messages", "Messages", status.MessageCount),
 		control.NewCount("media_items", "Media metadata", status.MediaCount),
 		control.NewCount("favorites", "Favorites", status.FavoriteCount),
+		control.NewCount("biz_accounts", "Public accounts", status.BizAccountCount),
 		control.NewCount("biz_articles", "Public-account articles", status.PublicAccountArticleCount),
 		control.NewCount("moments", "Moments", status.MomentCount),
 	}
@@ -1482,7 +1485,7 @@ func (e env) runCompletion(args []string) error {
 	if shell != "zsh" {
 		return output.UsageError{Err: fmt.Errorf("unsupported shell %q", shell)}
 	}
-	_, err := fmt.Fprintln(e.out, "#compdef weicrawl\n_arguments '1:command:(version init doctor metadata status sync unlock profiles contacts chats chat-members messages message-parts message-events search favorites articles media moments raw-records runs sql export snapshot import tui completion)' '*::arg:->args'")
+	_, err := fmt.Fprintln(e.out, "#compdef weicrawl\n_arguments '1:command:(version init doctor metadata status sync unlock profiles contacts chats chat-members messages message-parts message-events search favorites biz-accounts articles media moments raw-records runs sql export snapshot import tui completion)' '*::arg:->args'")
 	return err
 }
 
@@ -1596,6 +1599,7 @@ func manifest() control.Manifest {
 		{Title: "Message Parts", Argv: []string{"weicrawl", "--json", "message-parts"}, JSON: true},
 		{Title: "Message Events", Argv: []string{"weicrawl", "--json", "message-events"}, JSON: true},
 		{Title: "Favorites", Argv: []string{"weicrawl", "--json", "favorites"}, JSON: true},
+		{Title: "Biz Accounts", Argv: []string{"weicrawl", "--json", "biz-accounts"}, JSON: true},
 		{Title: "Articles", Argv: []string{"weicrawl", "--json", "articles"}, JSON: true},
 		{Title: "Media", Argv: []string{"weicrawl", "--json", "media"}, JSON: true},
 		{Title: "Moments", Argv: []string{"weicrawl", "--json", "moments"}, JSON: true},
@@ -1625,7 +1629,7 @@ func usage() string {
 commands:
   init doctor metadata status sync unlock
   profiles contacts chats chat-members messages message-parts message-events
-  favorites articles media moments raw-records runs
+  favorites biz-accounts articles media moments raw-records runs
   search sql export snapshot import tui completion version
 
 global flags:

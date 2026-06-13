@@ -543,7 +543,7 @@ func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := payload["commands"].(map[string]any)
-	for _, name := range []string{"version", "init", "doctor", "metadata", "status", "sync", "unlock", "profiles", "contacts", "chats", "chat-members", "messages", "message-parts", "message-events", "favorites", "articles", "media", "moments", "raw-records", "runs", "sql", "export", "snapshot", "import", "tui", "completion"} {
+	for _, name := range []string{"version", "init", "doctor", "metadata", "status", "sync", "unlock", "profiles", "contacts", "chats", "chat-members", "messages", "message-parts", "message-events", "favorites", "biz-accounts", "articles", "media", "moments", "raw-records", "runs", "sql", "export", "snapshot", "import", "tui", "completion"} {
 		if _, ok := commands[name]; !ok {
 			t.Fatalf("metadata command %q missing: %#v", name, commands)
 		}
@@ -887,6 +887,16 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	}
 	if got := int(bizAccounts["values"].([]any)[0].(map[string]any)["n"].(float64)); got != 1 {
 		t.Fatalf("biz account count = %d, payload=%#v", got, bizAccounts)
+	}
+	code, out, errOut = runForTest("--json", "biz-accounts")
+	if code != 0 {
+		t.Fatalf("biz-accounts code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &bizAccounts); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(bizAccounts["values"].([]any)); got != 1 {
+		t.Fatalf("biz-accounts values = %d, payload=%#v", got, bizAccounts)
 	}
 	code, out, errOut = runForTest("--json", "media")
 	if code != 0 {
