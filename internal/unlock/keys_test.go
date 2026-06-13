@@ -118,6 +118,23 @@ func TestWriteDefaultKeyManifestFromScanAcceptsExistingManifest(t *testing.T) {
 	}
 }
 
+func TestBuildKeyScanPlanUsesPythonOnlyForPythonScripts(t *testing.T) {
+	plan, err := BuildKeyScanPlan(true, false, "/tmp/find_key_memscan.py", "keys.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Command) != 2 || plan.Command[0] != "python3" || plan.Command[1] != "/tmp/find_key_memscan.py" {
+		t.Fatalf("python command = %#v", plan.Command)
+	}
+	plan, err = BuildKeyScanPlan(true, false, "/tmp/find_all_keys_macos", "keys.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Command) != 1 || plan.Command[0] != "/tmp/find_all_keys_macos" {
+		t.Fatalf("executable command = %#v", plan.Command)
+	}
+}
+
 func TestDecryptSnapshotWithSQLCipherFixture(t *testing.T) {
 	sqlcipher, err := FindSQLCipher("")
 	if err != nil {

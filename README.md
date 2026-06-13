@@ -119,6 +119,10 @@ go run ./cmd/weicrawl --json sync \
 `sync --decrypted-dir` command remains useful when decryption and import are
 run as separate review steps.
 
+`unlock scan-keys --script` accepts either a Python script or an executable
+helper. Python scripts are run with `python3`; other paths are executed
+directly.
+
 `wechat_keys.json` may either map individual copied database paths to keys or
 provide one profile key:
 

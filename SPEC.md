@@ -603,6 +603,8 @@ the decrypted output root.
 the reviewed extractor's output into a `__default_key` manifest at `<path>`,
 write it with private file permissions, and return only redacted scanner output.
 If the extractor writes a valid manifest itself, the command may reuse it.
+`--script` may point to a Python script or an executable helper; Python scripts
+are run through `python3`, while executable helpers are run directly.
 
 Output must include:
 

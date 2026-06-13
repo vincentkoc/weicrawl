@@ -80,11 +80,18 @@ func BuildKeyScanPlan(allowProcessInspect, execute bool, scriptPath, outputPath 
 	if strings.TrimSpace(outputPath) == "" {
 		outputPath = "wechat_keys.json"
 	}
-	plan.Command = []string{"python3", scriptPath}
+	plan.Command = keyScanCommand(scriptPath)
 	plan.OutputPath = outputPath
 	plan.Notes = append(plan.Notes, "run from the key extractor directory or pass --script")
 	plan.Notes = append(plan.Notes, "expected output: "+outputPath)
 	return plan, nil
+}
+
+func keyScanCommand(scriptPath string) []string {
+	if strings.HasSuffix(strings.ToLower(scriptPath), ".py") {
+		return []string{"python3", scriptPath}
+	}
+	return []string{scriptPath}
 }
 
 func ExecuteKeyScan(ctx context.Context, plan KeyScanPlan) ([]byte, error) {

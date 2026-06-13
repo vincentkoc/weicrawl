@@ -1266,18 +1266,20 @@ func TestCLIKeyScanRequiresExplicitProcessInspect(t *testing.T) {
 
 func TestCLIKeyScanExecuteRedactsKeyMaterial(t *testing.T) {
 	root := t.TempDir()
-	script := filepath.Join(root, "scanner.py")
+	script := filepath.Join(root, "scanner")
 	manifestPath := filepath.Join(root, "wechat_keys.json")
-	if err := os.WriteFile(script, []byte(`print("db key: " + "a"*64)
-print("wrapped key: x'" + "b"*64 + "'")
-`), 0o600); err != nil {
+	key := strings.Repeat("0", 64)
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf 'db key: %064d\n' 0
+printf "wrapped key: x'%064d'\n" 1
+`), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	code, out, errOut := runForTest("--json", "unlock", "scan-keys", "--allow-process-inspect", "--execute", "--script", script, "--scan-out", manifestPath)
 	if code != 0 {
 		t.Fatalf("scan execute code=%d stderr=%s stdout=%s", code, errOut, out)
 	}
-	if strings.Contains(out.String(), strings.Repeat("a", 64)) || strings.Contains(out.String(), strings.Repeat("b", 64)) {
+	if strings.Contains(out.String(), key) {
 		t.Fatalf("scan output leaked key material: %s", out.String())
 	}
 	var payload map[string]any
@@ -1297,7 +1299,7 @@ print("wrapped key: x'" + "b"*64 + "'")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(bytes), `"__default_key"`) || !strings.Contains(string(bytes), strings.Repeat("a", 64)) {
+	if !strings.Contains(string(bytes), `"__default_key"`) || !strings.Contains(string(bytes), key) {
 		t.Fatalf("manifest = %s", bytes)
 	}
 }
