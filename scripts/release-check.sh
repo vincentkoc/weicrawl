@@ -64,7 +64,11 @@ case "$tag" in
     ;;
 esac
 if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-  fail "tag $tag does not exist locally"
+	if [[ "$allow_missing_live" == "1" ]]; then
+		echo "release-check: tag $tag does not exist locally; continuing because this is a non-release dry run"
+	else
+		fail "tag $tag does not exist locally"
+	fi
 fi
 
 if [[ ! -d "$tap_dir" ]]; then

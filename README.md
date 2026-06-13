@@ -232,7 +232,8 @@ WEICRAWL_LIVE_KEYS=./wechat_keys.json \
 ./scripts/release-check.sh
 ```
 
-For a non-release dry run that still proves local build/release packaging, use:
+For a non-release dry run that still proves local build/release packaging
+without creating the tag first, use:
 
 ```bash
 WEICRAWL_RELEASE_TAG=v0.1.0 ./scripts/release-check.sh --allow-missing-live
