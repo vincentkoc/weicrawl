@@ -543,15 +543,35 @@ func (e env) runUnlock(args []string) error {
 		}
 		out, err := unlock.ExecuteKeyScan(e.ctx, plan)
 		if err != nil {
-			return fmt.Errorf("key scan failed: %w\n%s", err, strings.TrimSpace(string(out)))
+			outputText, _ := redactKeyScanOutput(out)
+			return fmt.Errorf("key scan failed: %w\n%s", err, outputText)
 		}
-		return e.write("unlock", map[string]any{"command": plan.Command, "output": strings.TrimSpace(string(out))})
+		outputText, redacted := redactKeyScanOutput(out)
+		return e.write("unlock", map[string]any{
+			"command":         plan.Command,
+			"output_redacted": outputText,
+			"output_bytes":    len(out),
+			"redacted":        redacted,
+		})
 	case "forget":
 		payload["forgotten"] = true
 	default:
 		return output.UsageError{Err: fmt.Errorf("unknown unlock subcommand %q", sub)}
 	}
 	return e.write("unlock", payload)
+}
+
+var keyScanSensitiveRE = regexp.MustCompile(`(?i)(?:0x|x')?[0-9a-f]{64}'?`)
+
+func redactKeyScanOutput(output []byte) (string, bool) {
+	text := strings.TrimSpace(string(output))
+	redacted := keyScanSensitiveRE.MatchString(text)
+	text = keyScanSensitiveRE.ReplaceAllString(text, "[redacted-key]")
+	const maxOutput = 4096
+	if len(text) > maxOutput {
+		text = text[:maxOutput] + "...[truncated]"
+	}
+	return text, redacted
 }
 
 func (e env) runList(table string, args []string) error {
