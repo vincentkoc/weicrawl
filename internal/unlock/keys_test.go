@@ -164,6 +164,37 @@ func TestWriteDefaultKeyManifestFromScanPreservesStdoutManifest(t *testing.T) {
 	}
 }
 
+func TestWriteDefaultKeyManifestFromScanExtractsEmbeddedStdoutManifest(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "wechat_keys.json")
+	perDBKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	stdout := []byte(`[*] scanning WeChat
+{"event":"not a manifest"}
+{"keys":{"message/message_0.db":"` + perDBKey + `"}}
+[*] done`)
+	written, err := WriteDefaultKeyManifestFromScan(stdout, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !written {
+		t.Fatal("expected embedded stdout manifest write")
+	}
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bytes), "[*]") || strings.Contains(string(bytes), "not a manifest") {
+		t.Fatalf("manifest includes logs: %s", bytes)
+	}
+	manifest, err := ReadKeyManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Keys["message/message_0.db"] != perDBKey {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+}
+
 func TestBuildKeyScanPlanUsesPythonOnlyForPythonScripts(t *testing.T) {
 	plan, err := BuildKeyScanPlan(true, false, "/tmp/find_key_memscan.py", "keys.json")
 	if err != nil {

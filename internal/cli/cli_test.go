@@ -1395,7 +1395,9 @@ func TestCLIKeyScanExecuteWritesStdoutManifest(t *testing.T) {
 	manifestPath := filepath.Join(root, "wechat_keys.json")
 	perDBKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf '[*] scanning\n'
 printf '{"keys":{"message/message_0.db":"`+perDBKey+`"}}'
+printf '\n[*] done\n'
 `), 0o700); err != nil {
 		t.Fatal(err)
 	}

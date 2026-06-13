@@ -116,13 +116,13 @@ func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, er
 	if _, err := ReadKeyManifest(outputPath); err == nil {
 		return false, nil
 	}
-	if _, err := readKeyManifestBytes(output); err == nil {
+	if manifestBytes, ok := stdoutManifest(output); ok {
 		if dir := filepath.Dir(outputPath); dir != "." {
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				return false, err
 			}
 		}
-		bytes := append([]byte(strings.TrimSpace(string(output))), '\n')
+		bytes := append(manifestBytes, '\n')
 		if err := os.WriteFile(outputPath, bytes, 0o600); err != nil {
 			return false, fmt.Errorf("write key manifest: %w", err)
 		}
@@ -150,6 +150,56 @@ func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, er
 		return true, nil
 	}
 	return false, errors.New("key scan output did not include a 64-hex key and no valid manifest was written")
+}
+
+func stdoutManifest(output []byte) ([]byte, bool) {
+	trimmed := strings.TrimSpace(string(output))
+	if _, err := readKeyManifestBytes([]byte(trimmed)); err == nil {
+		return []byte(trimmed), true
+	}
+scan:
+	for start := 0; start < len(output); start++ {
+		if output[start] != '{' {
+			continue
+		}
+		depth := 0
+		inString := false
+		escaped := false
+		for end := start; end < len(output); end++ {
+			ch := output[end]
+			if inString {
+				if escaped {
+					escaped = false
+					continue
+				}
+				if ch == '\\' {
+					escaped = true
+					continue
+				}
+				if ch == '"' {
+					inString = false
+				}
+				continue
+			}
+			switch ch {
+			case '"':
+				inString = true
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					candidate := []byte(strings.TrimSpace(string(output[start : end+1])))
+					if _, err := readKeyManifestBytes(candidate); err == nil {
+						return candidate, true
+					}
+					start = end
+					continue scan
+				}
+			}
+		}
+	}
+	return nil, false
 }
 
 func ReadKeyManifest(path string) (KeyManifest, error) {
