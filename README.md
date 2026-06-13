@@ -194,10 +194,17 @@ To prove a real copied-snapshot unlock without reading live WeChat files, pass
 an explicit reviewed manifest and copied snapshot:
 
 ```bash
+./scripts/live-copy-snapshot.sh
+
 WEICRAWL_LIVE_KEYS=./wechat_keys.json \
 WEICRAWL_LIVE_SNAPSHOT=/path/to/copied/profile \
 ./scripts/e2e-local.sh
 ```
+
+`live-copy-snapshot.sh` uses a temp archive and cache, discovers the local
+macOS WeChat container from the current `HOME`, copies DB/WAL/SHM sidecars into
+a retained snapshot, and prints the copied `snapshot_path`. If `WEICRAWL_LIVE_KEYS`
+is already set, it chains into `e2e-local.sh` with that copied snapshot.
 
 Tests use temp homes and synthetic SQLite fixtures only. They must not read or
 mutate the operator's live WeChat container.
