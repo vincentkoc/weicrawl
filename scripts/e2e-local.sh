@@ -278,6 +278,25 @@ if [[ -n "${WEICRAWL_LIVE_KEYS:-}" || -n "${WEICRAWL_LIVE_SNAPSHOT:-}" ]]; then
     --probe-decrypt \
     --keys "$WEICRAWL_LIVE_KEYS" \
     --snapshot "$WEICRAWL_LIVE_SNAPSHOT" > "$tmpdir/live-unlock-probe.json"
+  python3 - "$tmpdir/live-doctor-unlock.json" "$tmpdir/live-unlock-probe.json" <<'PY'
+import json
+import sys
+
+doctor = json.load(open(sys.argv[1]))
+probe = json.load(open(sys.argv[2]))
+
+readiness = None
+for check in doctor.get("checks", []):
+    if check.get("id") == "unlock_readiness":
+        readiness = check
+        break
+if not readiness or not readiness.get("ok"):
+    raise SystemExit(f"doctor unlock readiness failed: {readiness}")
+
+check = probe.get("check", {})
+if not probe.get("available") or not check.get("ready") or not check.get("probe_ready"):
+    raise SystemExit(f"live unlock probe did not prove keys: {probe}")
+PY
 
   if [[ "${WEICRAWL_LIVE_UNLOCK_SYNC:-0}" == "1" ]]; then
     "$weicrawl" --json unlock desktop \
@@ -286,5 +305,23 @@ if [[ -n "${WEICRAWL_LIVE_KEYS:-}" || -n "${WEICRAWL_LIVE_SNAPSHOT:-}" ]]; then
       --out "$tmpdir/decrypted" \
       --sync > "$tmpdir/live-unlock-sync.json"
     "$weicrawl" --json status > "$tmpdir/live-status-after-unlock.json"
+    python3 - "$tmpdir/live-unlock-sync.json" "$tmpdir/live-status-after-unlock.json" <<'PY'
+import json
+import sys
+
+unlock = json.load(open(sys.argv[1]))
+status = json.load(open(sys.argv[2]))
+
+sync = unlock.get("sync") or {}
+if sync.get("status") != "success":
+    raise SystemExit(f"live unlock sync did not succeed: {unlock}")
+if sync.get("imported_messages", 0) <= 0:
+    raise SystemExit(f"live unlock sync imported no messages: {unlock}")
+if not unlock.get("decrypted_removed"):
+    raise SystemExit(f"live unlock sync did not remove decrypted output by default: {unlock}")
+archive = status.get("archive") or {}
+if archive.get("message_count", 0) <= 0:
+    raise SystemExit(f"post-unlock archive has no messages: {status}")
+PY
   fi
 fi
