@@ -122,7 +122,8 @@ import unless `--keep-decrypted-snapshot` is supplied.
 
 `unlock scan-keys --script` accepts either a Python script or an executable
 helper. Python scripts are run with `python3`; other paths are executed
-directly.
+directly. Helpers receive `WEICRAWL_SCAN_OUT` and `WEICRAWL_KEY_MANIFEST`
+pointing at the requested manifest path.
 
 `wechat_keys.json` may either map individual copied database paths to keys or
 provide one profile key:

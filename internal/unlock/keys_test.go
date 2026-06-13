@@ -160,6 +160,25 @@ func TestBuildKeyScanPlanUsesPythonOnlyForPythonScripts(t *testing.T) {
 	}
 }
 
+func TestExecuteKeyScanSetsManifestEnvironment(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "scanner")
+	outPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf '%s' "$WEICRAWL_SCAN_OUT"
+test "$WEICRAWL_SCAN_OUT" = "$WEICRAWL_KEY_MANIFEST"
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := ExecuteKeyScan(context.Background(), KeyScanPlan{Allowed: true, Command: []string{script}, OutputPath: outPath})
+	if err != nil {
+		t.Fatalf("execute scan: %v\n%s", err, out)
+	}
+	if string(out) != outPath {
+		t.Fatalf("env output = %q", string(out))
+	}
+}
+
 func TestDecryptSnapshotWithSQLCipherFixture(t *testing.T) {
 	sqlcipher, err := FindSQLCipher("")
 	if err != nil {

@@ -606,7 +606,9 @@ the reviewed extractor's output into a `__default_key` manifest at `<path>`,
 write it with private file permissions, and return only redacted scanner output.
 If the extractor writes a valid manifest itself, the command may reuse it.
 `--script` may point to a Python script or an executable helper; Python scripts
-are run through `python3`, while executable helpers are run directly.
+are run through `python3`, while executable helpers are run directly. Scanner
+helpers should receive `WEICRAWL_SCAN_OUT` and `WEICRAWL_KEY_MANIFEST`
+environment variables pointing at the requested manifest path.
 
 Output must include:
 

@@ -103,6 +103,9 @@ func ExecuteKeyScan(ctx context.Context, plan KeyScanPlan) ([]byte, error) {
 	}
 	cmd := exec.CommandContext(ctx, plan.Command[0], plan.Command[1:]...)
 	cmd.Env = os.Environ()
+	if strings.TrimSpace(plan.OutputPath) != "" {
+		cmd.Env = append(cmd.Env, "WEICRAWL_SCAN_OUT="+plan.OutputPath, "WEICRAWL_KEY_MANIFEST="+plan.OutputPath)
+	}
 	return cmd.CombinedOutput()
 }
 
