@@ -93,3 +93,32 @@ WEICRAWL_LIVE_KEYS=./wechat_keys.json \
 For adapter testing without touching WeChat, use
 `scripts/wechat-key-scanner.example.py`. It writes a manifest from
 `WEICRAWL_WECHAT_SQLCIPHER_KEY` and is not a real extractor.
+
+## No-SIP scanner wrapper
+
+Do not disable SIP for the normal `weicrawl` flow. For current public macOS
+WeChat 4.x memory-scan extractors, try Developer Tools authorization first:
+
+```bash
+sudo DevToolsSecurity -enable
+```
+
+Then run a reviewed extractor through the repo wrapper:
+
+```bash
+WEICRAWL_WECHAT_KEY_HELPER_ROOT=/path/to/wechat-db-decrypt-macos \
+weicrawl --json unlock scan-keys \
+  --allow-process-inspect \
+  --execute \
+  --script ./scripts/wechat-key-scan-nosip.sh \
+  --scan-out ./wechat_keys.json
+```
+
+The wrapper uses Apple `/usr/bin/python3` with `PYTHONPATH="$(/usr/bin/lldb -P)"`
+so lldb's `_lldb` extension is loaded from the matching Command Line Tools
+runtime. It copies the helper-written `wechat_keys.json` to `WEICRAWL_SCAN_OUT`
+with mode `0600`.
+
+If macOS still denies attach after Developer Tools authorization, stop. That
+extractor cannot get keys without a more invasive target-app signature change or
+SIP change, neither of which is a safe default for `weicrawl`.

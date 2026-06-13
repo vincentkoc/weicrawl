@@ -58,7 +58,7 @@ weicrawl --json init \
 weicrawl --json unlock scan-keys \
   --allow-process-inspect \
   --execute \
-  --script /path/to/reviewed-helper \
+  --script ./scripts/wechat-key-scan-nosip.sh \
   --scan-out ./wechat_keys.json
 weicrawl --json init \
   --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile> \
@@ -66,9 +66,18 @@ weicrawl --json init \
   --probe-decrypt
 ```
 
+Before using the no-SIP wrapper, run:
+
+```bash
+sudo DevToolsSecurity -enable
+export WEICRAWL_WECHAT_KEY_HELPER_ROOT=/path/to/wechat-db-decrypt-macos
+```
+
 Only run the scanner command when the operator explicitly permits process
 inspection. Never commit `wechat_keys.json`, decrypted DBs, real snapshots, or
-private logs.
+private logs. Do not disable SIP for the normal `weicrawl` flow; if Developer
+Tools authorization still denies attach, stop and report that the selected
+extractor cannot run safely on the current machine.
 
 ## Import
 

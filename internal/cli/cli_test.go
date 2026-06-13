@@ -1593,6 +1593,9 @@ func TestCLIInitGuidesAndSetsUpKeys(t *testing.T) {
 	if keySetup["scanner_contract"] != "docs/unlock-extractors.md" || !keySetup["safe_by_default"].(bool) {
 		t.Fatalf("key setup guide missing: %#v", keySetup)
 	}
+	if keySetup["no_sip_wrapper"] != "scripts/wechat-key-scan-nosip.sh" || !strings.Contains(fmt.Sprint(keySetup["warnings"]), "do not disable SIP") {
+		t.Fatalf("no-SIP setup guidance missing: %#v", keySetup)
+	}
 	if fmt.Sprint(keySetup["next"]) == "" {
 		t.Fatalf("key setup next missing: %#v", keySetup)
 	}

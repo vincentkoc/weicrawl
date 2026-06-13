@@ -163,6 +163,9 @@ The full helper contract is documented in `docs/unlock-extractors.md`.
 `scripts/wechat-key-scanner.example.py` is a non-invasive adapter fixture for
 testing the contract with `WEICRAWL_WECHAT_SQLCIPHER_KEY`; it is not a WeChat
 key extractor.
+For reviewed memory-scan extractors, use
+`scripts/wechat-key-scan-nosip.sh` after `sudo DevToolsSecurity -enable`; do
+not disable SIP for the normal `weicrawl` flow.
 
 The repo also ships `.agents/skills/weicrawl/SKILL.md` for coding agents that
 need the pull/build/init/key-proof workflow.

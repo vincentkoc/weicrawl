@@ -222,7 +222,8 @@ func (e env) initKeySetup(snapshotPath, keysPath, templateOut string, probeDecry
 	steps := []map[string]any{
 		{"id": "copy_snapshot", "argv": []string{"weicrawl", "--json", "sync", "--source", "desktop-macos", "--keep-source-snapshot"}},
 		{"id": "write_template", "argv": []string{"weicrawl", "--json", "unlock", "template", "--snapshot", "<copied-profile-root>", "--out", "./wechat_keys.template.json"}},
-		{"id": "run_reviewed_scanner", "argv": []string{"weicrawl", "--json", "unlock", "scan-keys", "--allow-process-inspect", "--execute", "--script", "<reviewed-helper>", "--scan-out", "./wechat_keys.json"}},
+		{"id": "enable_devtools", "argv": []string{"sudo", "DevToolsSecurity", "-enable"}},
+		{"id": "run_no_sip_scanner_wrapper", "argv": []string{"weicrawl", "--json", "unlock", "scan-keys", "--allow-process-inspect", "--execute", "--script", "scripts/wechat-key-scan-nosip.sh", "--scan-out", "./wechat_keys.json"}},
 		{"id": "validate_keys", "argv": []string{"weicrawl", "--json", "unlock", "validate", "--keys", "./wechat_keys.json", "--snapshot", "<copied-profile-root>"}},
 		{"id": "probe_decrypt", "argv": []string{"weicrawl", "--json", "unlock", "desktop", "--explain", "--probe-decrypt", "--keys", "./wechat_keys.json", "--snapshot", "<copied-profile-root>"}},
 		{"id": "import_decrypted", "argv": []string{"weicrawl", "--json", "unlock", "desktop", "--keys", "./wechat_keys.json", "--snapshot", "<copied-profile-root>", "--out", "./decrypted", "--sync"}},
@@ -232,14 +233,15 @@ func (e env) initKeySetup(snapshotPath, keysPath, templateOut string, probeDecry
 		"safe_by_default":     true,
 		"scanner_contract":    "docs/unlock-extractors.md",
 		"example_scanner":     "scripts/wechat-key-scanner.example.py",
+		"no_sip_wrapper":      "scripts/wechat-key-scan-nosip.sh",
 		"default_manifest":    "wechat_keys.json",
 		"snapshot_required":   true,
 		"wechat_running":      disc.Running,
 		"sqlcipher":           resolvedSQLCipher,
 		"sqlcipher_available": sqlcipherErr == nil,
 		"commands":            steps,
-		"warnings":            []string{"key_info.db is metadata, not a filled key manifest", "do not commit wechat_keys.json", "weicrawl does not attach to WeChat unless an explicit external scanner is executed"},
-		"next":                "run sync with --keep-source-snapshot, fill or scan wechat_keys.json, then validate and probe decrypt",
+		"warnings":            []string{"key_info.db is metadata, not a filled key manifest", "do not commit wechat_keys.json", "weicrawl does not attach to WeChat unless an explicit external scanner is executed", "do not disable SIP for the normal weicrawl flow"},
+		"next":                "run sync with --keep-source-snapshot, fill or scan wechat_keys.json with the no-SIP wrapper, then validate and probe decrypt",
 	}
 	if sqlcipherErr != nil {
 		payload["sqlcipher_error"] = sqlcipherErr.Error()
