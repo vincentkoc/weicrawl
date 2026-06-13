@@ -185,7 +185,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 		status = "partial"
 	}
 	if len(snap.DatabaseFiles) > 0 && result.ImportedMessages == 0 {
-		result.Warnings = append(result.Warnings, "no normalized fixture tables were found; encrypted/native WeChat parsing is not implemented in this pass")
+		result.Warnings = append(result.Warnings, "no readable supported message tables were imported; source DBs may be encrypted or unsupported")
 	}
 	finished := time.Now().UTC()
 	if err := arc.InsertSyncRun(ctx, archive.SyncRun{
