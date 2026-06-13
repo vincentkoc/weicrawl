@@ -1,0 +1,125 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)release (e.g. v0.1.0)"
+        required: true
+        type: string
+      skip_publish:
+        description: "Build and validate without publishing assets or tap updates"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_SKIP_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_publish && '1' || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Stash GoReleaser config
+        run: cp .goreleaser.yaml /tmp/.goreleaser.yaml
+
+      - name: Checkout release tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: git checkout ${{ inputs.tag }}
+
+      - name: Configure GoReleaser
+        run: |
+          set -euo pipefail
+          args="release --clean --config /tmp/.goreleaser.yaml"
+          if [ "${RELEASE_SKIP_PUBLISH}" = "1" ]; then
+            args="${args} --skip=publish"
+          fi
+          echo "GORELEASER_ARGS=${args}" >> "$GITHUB_ENV"
+
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v7.2.2
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: ${{ env.GORELEASER_ARGS }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew-tap:
+    runs-on: ubuntu-latest
+    needs: goreleaser
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_publish }}
+    steps:
+      - name: Resolve release tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "RELEASE_TAG=${{ inputs.tag }}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Dispatch tap formula update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'vincentkoc/tap' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::Homebrew tap sync skipped; set HOMEBREW_TAP_TOKEN with workflow access to ${TAP_REPO}."
+            exit 0
+          fi
+
+          request_id="weicrawl-${RELEASE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          expected_title="Update weicrawl for ${RELEASE_TAG} (${request_id})"
+
+          gh workflow run update-formula.yml \
+            --repo "${TAP_REPO}" \
+            --ref main \
+            -f formula=weicrawl \
+            -f tag="${RELEASE_TAG}" \
+            -f repository="${GITHUB_REPOSITORY}" \
+            -f description="Local-first Weixin/WeChat archive CLI" \
+            -f artifact_template="{formula}_{version}_{target}.tar.gz" \
+            -f request_id="${request_id}"
+
+          run_id=""
+          for _ in {1..30}; do
+            run_id=$(gh run list \
+              --repo "${TAP_REPO}" \
+              --workflow update-formula.yml \
+              --branch main \
+              --event workflow_dispatch \
+              --limit 20 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle == \"${expected_title}\") | .databaseId" | head -n1)
+            if [ -n "${run_id}" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "${run_id}" ]; then
+            echo "::error::Could not find tap workflow run with title: ${expected_title}"
+            exit 1
+          fi
+
+          gh run watch "${run_id}" \
+            --repo "${TAP_REPO}" \
+            --exit-status \
+            --interval 10

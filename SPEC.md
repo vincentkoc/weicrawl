@@ -106,7 +106,8 @@ process memory, or mutate any Tencent-owned file.
 - no bypassing another user's account, device, workspace, phone, or enterprise
   policy
 - no crawlkit provider-specific code
-- no public release until the legal/privacy copy and unlock warnings are good
+- no public release tag until the legal/privacy copy and unlock warnings are
+  good
 
 ## source adapters
 
@@ -827,14 +828,16 @@ Log policy:
 Local/dev phase:
 
 - install with `go install ./cmd/weicrawl`
-- no public release requirement
-- no Homebrew formula until OpenClaw namespace move
+- GitHub releases through GoReleaser under `vincentkoc/weicrawl`
+- Homebrew formula updates dispatch to `vincentkoc/tap` by default
+- set `HOMEBREW_TAP_REPO=openclaw/homebrew-tap` during the OpenClaw namespace
+  move
 
 OpenClaw release phase:
 
 - module path: `github.com/openclaw/weicrawl`
 - GitHub releases through GoReleaser
-- source-built Homebrew formula in `openclaw/tap`
+- checksummed Homebrew formula in `openclaw/homebrew-tap`
 - passive update checks through `crawlkit/releasecheck`
 - release notes must call out desktop unlock risk and supported WeChat versions
 
