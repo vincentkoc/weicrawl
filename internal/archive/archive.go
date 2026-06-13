@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	ckstore "github.com/openclaw/crawlkit/store"
 	"github.com/vincentkoc/weicrawl/internal/schema"
@@ -82,6 +83,8 @@ type SearchHit struct {
 	ArticleID  string `json:"article_id,omitempty"`
 	FavoriteID string `json:"favorite_id,omitempty"`
 	MomentID   string `json:"moment_id,omitempty"`
+	ContactID  string `json:"contact_id,omitempty"`
+	MediaID    string `json:"media_id,omitempty"`
 	ChatID     string `json:"chat_id,omitempty"`
 	SenderID   string `json:"sender_id,omitempty"`
 	SentAt     string `json:"sent_at,omitempty"`
@@ -384,7 +387,7 @@ func (a *Archive) SearchMessages(ctx context.Context, query, chat, sender, kind,
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	args := []any{query}
+	args := []any{ftsQuery(query)}
 	clauses := []string{`message_fts match ?`}
 	if strings.TrimSpace(chat) != "" {
 		clauses = append(clauses, `m.chat_id = ?`)
@@ -440,7 +443,7 @@ func (a *Archive) SearchMessages(ctx context.Context, query, chat, sender, kind,
 }
 
 func (a *Archive) searchArticleHits(ctx context.Context, query, since string, limit int) ([]SearchHit, error) {
-	args := []any{query}
+	args := []any{ftsQuery(query)}
 	clauses := []string{`article_fts match ?`}
 	if strings.TrimSpace(since) != "" {
 		clauses = append(clauses, `coalesce(a.published_at, '') >= ?`)
@@ -476,7 +479,13 @@ union all
 select 'favorite', profile_id, favorite_id, kind, coalesce(title,'') || ' ' || text, coalesce(updated_at,'') from favorites where (coalesce(title,'') like ? or text like ?) and coalesce(updated_at,'9999') >= ?
 union all
 select 'moment', profile_id, moment_id, 'moment', text, coalesce(created_at,'') from moments where text like ? and coalesce(created_at,'9999') >= ?
-limit ?`, pattern, pattern, since, pattern, pattern, since, pattern, since, limit)
+union all
+select 'contact', profile_id, contact_id, kind, trim(coalesce(display_name,'') || ' ' || coalesce(remark_name,'') || ' ' || coalesce(alias,'') || ' ' || contact_id), coalesce(updated_at,'') from contacts where (coalesce(display_name,'') like ? or coalesce(remark_name,'') like ? or coalesce(alias,'') like ? or contact_id like ?) and coalesce(updated_at,'9999') >= ?
+union all
+select 'chat', profile_id, chat_id, kind, trim(coalesce(title,'') || ' ' || chat_id), coalesce(last_message_at, updated_at, '') from chats where (coalesce(title,'') like ? or chat_id like ?) and coalesce(coalesce(last_message_at, updated_at), '9999') >= ?
+union all
+select 'media', profile_id, media_id, kind, trim(coalesce(source_path,'') || ' ' || coalesce(archive_path,'') || ' ' || coalesce(mime_type,'') || ' ' || media_id), coalesce(updated_at,'') from media_items where (coalesce(source_path,'') like ? or coalesce(archive_path,'') like ? or coalesce(mime_type,'') like ? or media_id like ?) and coalesce(updated_at,'9999') >= ?
+limit ?`, pattern, pattern, since, pattern, pattern, since, pattern, since, pattern, pattern, pattern, pattern, since, pattern, pattern, since, pattern, pattern, pattern, pattern, since, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -496,10 +505,30 @@ limit ?`, pattern, pattern, since, pattern, pattern, since, pattern, since, limi
 			hit.FavoriteID = id
 		case "moment":
 			hit.MomentID = id
+		case "contact":
+			hit.ContactID = id
+		case "chat":
+			hit.ChatID = id
+		case "media":
+			hit.MediaID = id
 		}
 		hits = append(hits, hit)
 	}
 	return hits, rows.Err()
+}
+
+func ftsQuery(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return query
+	}
+	for _, r := range query {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || unicode.IsSpace(r) {
+			continue
+		}
+		return `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
+	}
+	return query
 }
 
 func (a *Archive) RebuildFTS(ctx context.Context) error {

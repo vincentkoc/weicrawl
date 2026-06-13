@@ -162,6 +162,28 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if hits := search["hits"].([]any); len(hits) < 2 {
 		t.Fatalf("boarding hits = %#v", hits)
 	}
+	code, out, errOut = runForTest("--json", "search", "Alice")
+	if code != 0 {
+		t.Fatalf("search Alice code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &search); err != nil {
+		t.Fatal(err)
+	}
+	entities := searchEntitySet(search["hits"].([]any))
+	if !entities["contact"] || !entities["chat"] {
+		t.Fatalf("Alice search entities = %#v hits=%#v", entities, search["hits"])
+	}
+	code, out, errOut = runForTest("--json", "search", "sample.txt")
+	if code != 0 {
+		t.Fatalf("search media code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &search); err != nil {
+		t.Fatal(err)
+	}
+	entities = searchEntitySet(search["hits"].([]any))
+	if !entities["media"] {
+		t.Fatalf("media search entities = %#v hits=%#v", entities, search["hits"])
+	}
 	code, out, errOut = runForTest("--json", "tui", "--scope", "all", "--limit", "20")
 	if code != 0 {
 		t.Fatalf("tui json code=%d stderr=%s stdout=%s", code, errOut, out)
@@ -726,6 +748,15 @@ func readTUIKindCounts(t *testing.T, data []byte) map[string]int {
 		}
 	}
 	return counts
+}
+
+func searchEntitySet(hits []any) map[string]bool {
+	entities := map[string]bool{}
+	for _, value := range hits {
+		hit := value.(map[string]any)
+		entities[fmt.Sprint(hit["entity"])] = true
+	}
+	return entities
 }
 
 func createNativeContactDB(t *testing.T, path string) {
