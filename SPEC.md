@@ -542,6 +542,9 @@ Rules:
 - store run provenance
 - skip unsupported rows into `raw_records`
 - produce stable JSON summaries
+- `--source all` runs enabled configured sources plus explicit artifact sources;
+  it must not call the official-account network API unless that source is
+  enabled in config
 
 ### `unlock`
 

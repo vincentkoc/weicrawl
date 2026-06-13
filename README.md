@@ -55,6 +55,19 @@ The default desktop sync copies local DBs first. If they are encrypted, the sync
 records the profile and snapshot provenance, then warns that no readable tables
 were imported.
 
+To run every configured local source plus any explicitly selected artifact
+sources:
+
+```bash
+go run ./cmd/weicrawl --json sync --source all --keep-source-snapshot
+```
+
+`--source all` includes `desktop-macos` when enabled in config. It includes
+`desktop-backup` only when `--backup-root` is supplied, import artifacts only
+when `--import-path` is supplied, and `official-account-api` only when that
+source is enabled in config, so desktop-local syncs do not make surprise network
+calls just because credentials exist in the environment.
+
 Backup or migration directories are only read when selected explicitly:
 
 ```bash

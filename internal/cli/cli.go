@@ -47,6 +47,31 @@ type env struct {
 	format output.Format
 }
 
+type syncOptions struct {
+	Source       string
+	Profile      string
+	IncludeMedia bool
+	MediaMode    string
+	KeepSource   bool
+	DecryptedDir string
+	BackupRoot   string
+	ImportPath   string
+	ImportFormat string
+}
+
+type syncAllResult struct {
+	Source   string         `json:"source"`
+	Status   string         `json:"status"`
+	Results  []any          `json:"results,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
+	Errors   []syncAllError `json:"errors,omitempty"`
+}
+
+type syncAllError struct {
+	Source string `json:"source"`
+	Error  string `json:"error"`
+}
+
 func Main(args []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 	global, rest, err := parseGlobals(args)
@@ -312,65 +337,143 @@ func (e env) runSync(args []string) error {
 	if *source != "desktop-macos" && *source != "desktop-backup" && *source != "all" && *source != "official-account-api" && *source != "import" {
 		return output.UsageError{Err: fmt.Errorf("source %q is not implemented yet", *source)}
 	}
+	if *source == "all" && strings.TrimSpace(*importPath) != "" && *importFormat != "jsonl" {
+		return output.UsageError{Err: fmt.Errorf("unsupported import format %q", *importFormat)}
+	}
+	opts := syncOptions{
+		Source:       *source,
+		Profile:      *profileFlag,
+		IncludeMedia: *includeMedia,
+		MediaMode:    *mediaMode,
+		KeepSource:   *keepSource,
+		DecryptedDir: *decryptedDir,
+		BackupRoot:   *backupRoot,
+		ImportPath:   *importPath,
+		ImportFormat: *importFormat,
+	}
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
 	}
 	defer arc.Close()
-	if *source == "official-account-api" {
-		result, err := officialaccount.Sync(e.ctx, arc, officialaccount.Options{Config: e.loaded.Config.OfficialAccount})
+	if opts.Source == "all" {
+		return e.runSyncAll(arc, opts)
+	}
+	if opts.Source == "official-account-api" {
+		result, err := e.syncOfficial(arc)
 		if err != nil {
 			return err
 		}
 		return e.write("sync", result)
 	}
-	if *source == "desktop-backup" {
-		if strings.TrimSpace(*backupRoot) == "" {
+	if opts.Source == "desktop-backup" {
+		if strings.TrimSpace(opts.BackupRoot) == "" {
 			return output.UsageError{Err: errors.New("--backup-root is required for desktop-backup")}
 		}
-		result, err := backup.Sync(e.ctx, arc, backup.Options{Root: config.Expand(*backupRoot), ProfileID: *profileFlag})
+		result, err := e.syncBackup(arc, opts)
 		if err != nil {
 			return err
 		}
 		return e.write("sync", result)
 	}
-	if *source == "import" {
-		if strings.TrimSpace(*importPath) == "" {
+	if opts.Source == "import" {
+		if strings.TrimSpace(opts.ImportPath) == "" {
 			return output.UsageError{Err: errors.New("--import-path is required for source=import")}
 		}
-		if *importFormat != "jsonl" {
-			return output.UsageError{Err: fmt.Errorf("unsupported import format %q", *importFormat)}
+		if opts.ImportFormat != "jsonl" {
+			return output.UsageError{Err: fmt.Errorf("unsupported import format %q", opts.ImportFormat)}
 		}
-		return e.importJSONL(arc, config.Expand(*importPath))
-	}
-	if strings.TrimSpace(*decryptedDir) != "" {
-		profileID := *profileFlag
-		if profileID == "" {
-			profileID = "decrypted"
-		}
-		result, err := desktopmac.SyncDecryptedDirectory(e.ctx, arc, profileID, config.Expand(*decryptedDir), "")
+		result, err := e.importJSONLResult(arc, config.Expand(opts.ImportPath))
 		if err != nil {
 			return err
 		}
-		return e.write("sync", result)
+		return e.write("import", result)
 	}
-	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
-	profile, ok := desktopmac.SelectProfile(disc, *profileFlag)
-	if !ok {
-		return fmt.Errorf("profile %q not found; discovered %d profiles", *profileFlag, len(disc.ProfileRoots))
-	}
-	result, err := desktopmac.SyncDesktopSnapshot(e.ctx, arc, desktopmac.SnapshotOptions{
-		CacheDir:     e.loaded.Config.Archive.CacheDir,
-		Profile:      profile,
-		AppVersion:   disc.AppVersion,
-		IncludeMedia: *includeMedia,
-		MediaMode:    *mediaMode,
-		Keep:         *keepSource,
-	})
+	result, err := e.syncDesktop(arc, opts)
 	if err != nil {
 		return err
 	}
 	return e.write("sync", result)
+}
+
+func (e env) runSyncAll(arc *archive.Archive, opts syncOptions) error {
+	result := syncAllResult{Source: "all", Status: "success"}
+	run := func(source string, fn func() (any, error)) {
+		item, err := fn()
+		if err != nil {
+			result.Errors = append(result.Errors, syncAllError{Source: source, Error: err.Error()})
+			return
+		}
+		result.Results = append(result.Results, item)
+	}
+	if e.loaded.Config.DesktopMacOS.Enabled {
+		run("desktop-macos", func() (any, error) {
+			return e.syncDesktop(arc, opts)
+		})
+	}
+	if e.loaded.Config.OfficialAccount.Enabled {
+		run("official-account-api", func() (any, error) {
+			return e.syncOfficial(arc)
+		})
+	}
+	if strings.TrimSpace(opts.BackupRoot) != "" {
+		run("desktop-backup", func() (any, error) {
+			return e.syncBackup(arc, opts)
+		})
+	}
+	if strings.TrimSpace(opts.ImportPath) != "" {
+		run("import", func() (any, error) {
+			if opts.ImportFormat != "jsonl" {
+				return nil, output.UsageError{Err: fmt.Errorf("unsupported import format %q", opts.ImportFormat)}
+			}
+			return e.importJSONLResult(arc, config.Expand(opts.ImportPath))
+		})
+	}
+	if len(result.Results) == 0 {
+		if len(result.Errors) > 0 {
+			result.Status = "failed"
+			if err := e.write("sync", result); err != nil {
+				return err
+			}
+			return errors.New("all selected sync sources failed")
+		}
+		result.Status = "skipped"
+		result.Warnings = append(result.Warnings, "no configured or explicitly selected sources ran")
+	} else if len(result.Errors) > 0 {
+		result.Status = "partial"
+	}
+	return e.write("sync", result)
+}
+
+func (e env) syncOfficial(arc *archive.Archive) (officialaccount.Result, error) {
+	return officialaccount.Sync(e.ctx, arc, officialaccount.Options{Config: e.loaded.Config.OfficialAccount})
+}
+
+func (e env) syncBackup(arc *archive.Archive, opts syncOptions) (backup.Result, error) {
+	return backup.Sync(e.ctx, arc, backup.Options{Root: config.Expand(opts.BackupRoot), ProfileID: opts.Profile})
+}
+
+func (e env) syncDesktop(arc *archive.Archive, opts syncOptions) (desktopmac.SyncResult, error) {
+	if strings.TrimSpace(opts.DecryptedDir) != "" {
+		profileID := opts.Profile
+		if profileID == "" {
+			profileID = "decrypted"
+		}
+		return desktopmac.SyncDecryptedDirectory(e.ctx, arc, profileID, config.Expand(opts.DecryptedDir), "")
+	}
+	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
+	profile, ok := desktopmac.SelectProfile(disc, opts.Profile)
+	if !ok {
+		return desktopmac.SyncResult{}, fmt.Errorf("profile %q not found; discovered %d profiles", opts.Profile, len(disc.ProfileRoots))
+	}
+	return desktopmac.SyncDesktopSnapshot(e.ctx, arc, desktopmac.SnapshotOptions{
+		CacheDir:     e.loaded.Config.Archive.CacheDir,
+		Profile:      profile,
+		AppVersion:   disc.AppVersion,
+		IncludeMedia: opts.IncludeMedia,
+		MediaMode:    opts.MediaMode,
+		Keep:         opts.KeepSource,
+	})
 }
 
 func (e env) runUnlock(args []string) error {
@@ -590,9 +693,17 @@ type importEntity struct {
 }
 
 func (e env) importJSONL(arc *archive.Archive, path string) error {
-	file, err := os.Open(path)
+	result, err := e.importJSONLResult(arc, path)
 	if err != nil {
 		return err
+	}
+	return e.write("import", result)
+}
+
+func (e env) importJSONLResult(arc *archive.Archive, path string) (jsonlImportResult, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return jsonlImportResult{}, err
 	}
 	defer file.Close()
 	entities := importEntities()
@@ -604,24 +715,24 @@ func (e env) importJSONL(arc *archive.Archive, path string) error {
 		line++
 		var row map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
-			return fmt.Errorf("decode jsonl line %d: %w", line, err)
+			return result, fmt.Errorf("decode jsonl line %d: %w", line, err)
 		}
 		entityName := strings.TrimSpace(fmt.Sprint(row["entity"]))
 		entity, ok := entities[entityName]
 		if !ok {
-			return fmt.Errorf("unsupported jsonl entity %q on line %d", entityName, line)
+			return result, fmt.Errorf("unsupported jsonl entity %q on line %d", entityName, line)
 		}
 		if err := insertJSONLEntity(e.ctx, arc, entity, row); err != nil {
-			return fmt.Errorf("import %s line %d: %w", entityName, line, err)
+			return result, fmt.Errorf("import %s line %d: %w", entityName, line, err)
 		}
 		result.Rows++
 		result.Counts[entityName]++
 	}
 	if err := scanner.Err(); err != nil {
-		return err
+		return result, err
 	}
 	if err := arc.RebuildFTS(e.ctx); err != nil {
-		return err
+		return result, err
 	}
 	started := time.Now().UTC()
 	if err := arc.InsertSyncRun(e.ctx, archive.SyncRun{
@@ -638,9 +749,9 @@ func (e env) importJSONL(arc *archive.Archive, path string) error {
 		ImportedMedia:      int64(result.Counts["media"]),
 		ImportedRawRecords: int64(result.Counts["raw_record"]),
 	}); err != nil {
-		return err
+		return result, err
 	}
-	return e.write("import", result)
+	return result, nil
 }
 
 func importEntities() map[string]importEntity {

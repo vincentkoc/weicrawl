@@ -356,6 +356,53 @@ func TestCLISyncDesktopBackup(t *testing.T) {
 	}
 }
 
+func TestCLISyncAllAggregatesConfiguredAndExplicitSources(t *testing.T) {
+	root := t.TempDir()
+	configRoot := filepath.Join(root, "config")
+	cacheRoot := filepath.Join(root, "cache")
+	cfgPath := filepath.Join(configRoot, "weicrawl", "config.toml")
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("WEICRAWL_CACHE_DIR", cacheRoot)
+	t.Setenv("WEICRAWL_CONFIG", cfgPath)
+	t.Setenv("WEICRAWL_WECHAT_APP_ID", "configured-but-disabled")
+	t.Setenv("WEICRAWL_WECHAT_APP_SECRET", "configured-but-disabled")
+
+	container := filepath.Join(root, "WeChatContainer")
+	profileRoot := filepath.Join(container, "Data", "Documents", "xwechat_files", "wxid_all_abcd")
+	createFixtureDB(t, filepath.Join(profileRoot, "db_storage", "message", "message_0.db"))
+	backupRoot := filepath.Join(root, "backup-root")
+	createFixtureDB(t, filepath.Join(backupRoot, "db_storage", "message", "message_0.db"))
+
+	code, out, errOut := runForTest("--json", "init")
+	if code != 0 {
+		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	patchConfigPath(t, cfgPath, container)
+	code, out, errOut = runForTest("--json", "sync", "--source", "all", "--profile", "wxid_all", "--backup-root", backupRoot)
+	if code != 0 {
+		t.Fatalf("sync all code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["source"] != "all" || payload["status"] != "success" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	sources := map[string]bool{}
+	for _, value := range payload["results"].([]any) {
+		item := value.(map[string]any)
+		sources[fmt.Sprint(item["source"])] = true
+	}
+	if !sources["desktop-macos"] || !sources["desktop-backup"] {
+		t.Fatalf("sources = %#v payload=%#v", sources, payload)
+	}
+	if sources["official-account-api"] {
+		t.Fatalf("official account should not run unless enabled: %#v", payload)
+	}
+}
+
 func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")
