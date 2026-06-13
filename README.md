@@ -124,6 +124,9 @@ import unless `--keep-decrypted-snapshot` is supplied.
 helper. Python scripts are run with `python3`; other paths are executed
 directly. Helpers receive `WEICRAWL_SCAN_OUT` and `WEICRAWL_KEY_MANIFEST`
 pointing at the requested manifest path.
+If a helper prints a valid `wechat_keys.json` object to stdout, `weicrawl`
+writes that object to `--scan-out` instead of reducing it to a single default
+key.
 
 `wechat_keys.json` may either map individual copied database paths to keys or
 provide one profile key:

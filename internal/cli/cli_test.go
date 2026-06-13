@@ -1389,6 +1389,39 @@ printf 'db key: `+stdoutKey+`\n'
 	}
 }
 
+func TestCLIKeyScanExecuteWritesStdoutManifest(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "scanner")
+	manifestPath := filepath.Join(root, "wechat_keys.json")
+	perDBKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf '{"keys":{"message/message_0.db":"`+perDBKey+`"}}'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runForTest("--json", "unlock", "scan-keys", "--allow-process-inspect", "--execute", "--script", script, "--scan-out", manifestPath)
+	if code != 0 {
+		t.Fatalf("scan execute code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if strings.Contains(out.String(), perDBKey) {
+		t.Fatalf("scan output leaked key material: %s", out.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload["manifest_written"].(bool) {
+		t.Fatalf("expected stdout manifest write: %#v", payload)
+	}
+	bytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(bytes), perDBKey) || strings.Contains(string(bytes), "__default_key") {
+		t.Fatalf("manifest = %s", bytes)
+	}
+}
+
 func runForTest(args ...string) (int, *bytes.Buffer, *bytes.Buffer) {
 	var stdout, stderr bytes.Buffer
 	code := Main(args, &stdout, &stderr)

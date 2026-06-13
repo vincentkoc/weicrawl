@@ -605,6 +605,9 @@ the decrypted output root.
 the reviewed extractor's output into a `__default_key` manifest at `<path>`,
 write it with private file permissions, and return only redacted scanner output.
 If the extractor writes a valid manifest itself, the command may reuse it.
+If the extractor prints a valid manifest JSON object to stdout, the command
+should write that manifest to `<path>` instead of collapsing it into a default
+key.
 `--script` may point to a Python script or an executable helper; Python scripts
 are run through `python3`, while executable helpers are run directly. Scanner
 helpers should receive `WEICRAWL_SCAN_OUT` and `WEICRAWL_KEY_MANIFEST`

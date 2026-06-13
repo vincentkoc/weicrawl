@@ -116,6 +116,18 @@ func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, er
 	if _, err := ReadKeyManifest(outputPath); err == nil {
 		return false, nil
 	}
+	if _, err := readKeyManifestBytes(output); err == nil {
+		if dir := filepath.Dir(outputPath); dir != "." {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return false, err
+			}
+		}
+		bytes := append([]byte(strings.TrimSpace(string(output))), '\n')
+		if err := os.WriteFile(outputPath, bytes, 0o600); err != nil {
+			return false, fmt.Errorf("write key manifest: %w", err)
+		}
+		return true, nil
+	}
 	match := scanKeyRE.FindSubmatch(output)
 	if len(match) >= 2 {
 		key, err := normalizeManifestKey("__default_key", string(match[1]))
@@ -145,6 +157,14 @@ func ReadKeyManifest(path string) (KeyManifest, error) {
 	if err != nil {
 		return KeyManifest{}, fmt.Errorf("read key manifest: %w", err)
 	}
+	manifest, err := readKeyManifestBytes(bytes)
+	if err != nil {
+		return KeyManifest{}, err
+	}
+	return manifest, nil
+}
+
+func readKeyManifestBytes(bytes []byte) (KeyManifest, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(bytes, &raw); err != nil {
 		return KeyManifest{}, fmt.Errorf("parse key manifest: %w", err)

@@ -143,6 +143,27 @@ func TestWriteDefaultKeyManifestFromScanDoesNotOverwriteExistingManifest(t *test
 	}
 }
 
+func TestWriteDefaultKeyManifestFromScanPreservesStdoutManifest(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "wechat_keys.json")
+	perDBKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	stdout := []byte(`{"keys":{"message/message_0.db":"` + perDBKey + `"}}`)
+	written, err := WriteDefaultKeyManifestFromScan(stdout, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !written {
+		t.Fatal("expected stdout manifest write")
+	}
+	manifest, err := ReadKeyManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.DefaultKey != "" || manifest.Keys["message/message_0.db"] != perDBKey {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+}
+
 func TestBuildKeyScanPlanUsesPythonOnlyForPythonScripts(t *testing.T) {
 	plan, err := BuildKeyScanPlan(true, false, "/tmp/find_key_memscan.py", "keys.json")
 	if err != nil {
