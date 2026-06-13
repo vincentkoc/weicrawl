@@ -1448,30 +1448,46 @@ func (e env) tuiRows(arc *archive.Archive, scope string, limit int) ([]cktui.Row
 }
 
 func (e env) tuiMessageRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
-	result, err := arc.Query(e.ctx, `select message_id, chat_id, coalesce(sender_id,''), message_type, coalesce(sent_at,''), text from messages order by coalesce(sent_at,''), message_id limit ?`, limit)
+	result, err := arc.Query(e.ctx, `select m.profile_id, m.message_id, m.chat_id, coalesce(m.sender_id,'') as sender_id, m.message_type, coalesce(m.sent_at,'') as sent_at, m.text,
+coalesce((select p.url from message_parts p where p.profile_id=m.profile_id and p.message_id=m.message_id and coalesce(p.url,'') != '' order by p.part_index limit 1),'') as part_url,
+coalesce((select p.media_id from message_parts p where p.profile_id=m.profile_id and p.message_id=m.message_id and coalesce(p.media_id,'') != '' order by p.part_index limit 1),'') as part_media_id
+from messages m order by coalesce(m.sent_at,''), m.message_id limit ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	rows := make([]cktui.Row, 0, len(result.Values))
 	for _, value := range result.Values {
 		id := fmt.Sprint(value["message_id"])
+		chatID := fmt.Sprint(value["chat_id"])
+		messageType := fmt.Sprint(value["message_type"])
+		partURL := fmt.Sprint(value["part_url"])
+		mediaID := fmt.Sprint(value["part_media_id"])
 		rows = append(rows, cktui.Row{
 			Source:    cktui.SourceLocal,
-			Kind:      "message:" + fmt.Sprint(value["message_type"]),
+			Kind:      "message:" + messageType,
 			ID:        id,
-			ParentID:  fmt.Sprint(value["chat_id"]),
-			Container: fmt.Sprint(value["chat_id"]),
+			ParentID:  chatID,
+			Container: chatID,
 			Author:    fmt.Sprint(value["sender_id"]),
-			Title:     id,
+			Title:     firstDisplay(value["text"], id),
 			Text:      fmt.Sprint(value["text"]),
+			Detail:    tuiDetail("chat", chatID, "sender", fmt.Sprint(value["sender_id"]), "type", messageType, "media", mediaID),
+			URL:       partURL,
 			CreatedAt: fmt.Sprint(value["sent_at"]),
+			Tags:      tuiTags(messageType, chatID),
+			Fields: tuiRowFields(
+				"profile_id", fmt.Sprint(value["profile_id"]),
+				"chat_id", chatID,
+				"message_type", messageType,
+				"media_id", mediaID,
+			),
 		})
 	}
 	return rows, nil
 }
 
 func (e env) tuiArticleRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
-	result, err := arc.Query(e.ctx, `select article_id, coalesce(account_id,''), title, coalesce(summary,''), coalesce(url,''), coalesce(published_at,'') from biz_articles order by coalesce(published_at,''), article_id limit ?`, limit)
+	result, err := arc.Query(e.ctx, `select article_id, coalesce(account_id,'') as account_id, title, coalesce(summary,'') as summary, coalesce(url,'') as url, coalesce(published_at,'') as published_at from biz_articles order by coalesce(published_at,''), article_id limit ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1485,61 +1501,88 @@ func (e env) tuiArticleRows(arc *archive.Archive, limit int) ([]cktui.Row, error
 			Container: firstDisplay(value["account_id"], "official-account"),
 			Title:     firstDisplay(value["title"], value["article_id"]),
 			Text:      fmt.Sprint(value["summary"]),
+			Detail:    tuiDetail("account", fmt.Sprint(value["account_id"]), "published", fmt.Sprint(value["published_at"])),
 			URL:       fmt.Sprint(value["url"]),
 			CreatedAt: fmt.Sprint(value["published_at"]),
+			Tags:      tuiTags("article", value["account_id"]),
+			Fields: tuiRowFields(
+				"account_id", fmt.Sprint(value["account_id"]),
+				"url", fmt.Sprint(value["url"]),
+			),
 		})
 	}
 	return rows, nil
 }
 
 func (e env) tuiFavoriteRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
-	result, err := arc.Query(e.ctx, `select favorite_id, kind, coalesce(title,''), text, coalesce(source_ref,''), coalesce(updated_at,'') from favorites order by updated_at, favorite_id limit ?`, limit)
+	result, err := arc.Query(e.ctx, `select f.profile_id, f.favorite_id, f.kind, coalesce(f.title,'') as title, f.text, coalesce(f.source_ref,'') as source_ref, coalesce(f.updated_at,'') as updated_at,
+coalesce((select p.url from message_parts p where p.profile_id=f.profile_id and p.message_id=f.source_ref and coalesce(p.url,'') != '' order by p.part_index limit 1),'') as source_url
+from favorites f order by f.updated_at, f.favorite_id limit ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	rows := make([]cktui.Row, 0, len(result.Values))
 	for _, value := range result.Values {
+		kind := fmt.Sprint(value["kind"])
+		sourceRef := fmt.Sprint(value["source_ref"])
 		rows = append(rows, cktui.Row{
 			Source:    cktui.SourceLocal,
-			Kind:      "favorite:" + fmt.Sprint(value["kind"]),
+			Kind:      "favorite:" + kind,
 			ID:        fmt.Sprint(value["favorite_id"]),
-			ParentID:  fmt.Sprint(value["source_ref"]),
+			ParentID:  sourceRef,
 			Container: "favorites",
 			Title:     firstDisplay(value["title"], value["favorite_id"]),
 			Text:      fmt.Sprint(value["text"]),
+			Detail:    tuiDetail("kind", kind, "source", sourceRef),
+			URL:       firstDisplay(value["source_url"], firstURLFromText(fmt.Sprint(value["text"]), fmt.Sprint(value["title"]))),
 			UpdatedAt: fmt.Sprint(value["updated_at"]),
+			Tags:      tuiTags("favorite", kind),
+			Fields: tuiRowFields(
+				"profile_id", fmt.Sprint(value["profile_id"]),
+				"source_ref", sourceRef,
+				"source_url", fmt.Sprint(value["source_url"]),
+			),
 		})
 	}
 	return rows, nil
 }
 
 func (e env) tuiMediaRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
-	result, err := arc.Query(e.ctx, `select media_id, kind, coalesce(source_path,''), coalesce(archive_path,''), coalesce(mime_type,''), coalesce(byte_size,0), coalesce(updated_at,'') from media_items order by updated_at, media_id limit ?`, limit)
+	result, err := arc.Query(e.ctx, `select profile_id, media_id, kind, coalesce(source_path,'') as source_path, coalesce(archive_path,'') as archive_path, coalesce(mime_type,'') as mime_type, coalesce(byte_size,0) as byte_size, coalesce(updated_at,'') as updated_at from media_items order by updated_at, media_id limit ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	rows := make([]cktui.Row, 0, len(result.Values))
 	for _, value := range result.Values {
-		path := firstDisplay(value["archive_path"], value["source_path"])
+		kind := fmt.Sprint(value["kind"])
+		sourcePath := fmt.Sprint(value["source_path"])
+		archivePath := fmt.Sprint(value["archive_path"])
+		path := firstDisplay(archivePath, sourcePath)
 		rows = append(rows, cktui.Row{
 			Source:    cktui.SourceLocal,
-			Kind:      "media:" + fmt.Sprint(value["kind"]),
+			Kind:      "media:" + kind,
 			ID:        fmt.Sprint(value["media_id"]),
 			Container: "media",
 			Title:     firstDisplay(filepath.Base(path), value["media_id"]),
 			Text:      path,
+			Detail:    tuiDetail("kind", kind, "mime", fmt.Sprint(value["mime_type"]), "bytes", fmt.Sprint(value["byte_size"])),
+			URL:       path,
 			UpdatedAt: fmt.Sprint(value["updated_at"]),
-			Fields: map[string]string{
-				"mime_type": fmt.Sprint(value["mime_type"]),
-				"byte_size": fmt.Sprint(value["byte_size"]),
-			},
+			Tags:      tuiTags("media", kind, value["mime_type"]),
+			Fields: tuiRowFields(
+				"profile_id", fmt.Sprint(value["profile_id"]),
+				"source_path", sourcePath,
+				"archive_path", archivePath,
+				"mime_type", fmt.Sprint(value["mime_type"]),
+				"byte_size", fmt.Sprint(value["byte_size"]),
+			),
 		})
 	}
 	return rows, nil
 }
 
 func (e env) tuiMomentRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
-	result, err := arc.Query(e.ctx, `select moment_id, coalesce(author_id,''), text, coalesce(created_at,'') from moments order by created_at, moment_id limit ?`, limit)
+	result, err := arc.Query(e.ctx, `select moment_id, coalesce(author_id,'') as author_id, text, coalesce(created_at,'') as created_at from moments order by created_at, moment_id limit ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1553,7 +1596,13 @@ func (e env) tuiMomentRows(arc *archive.Archive, limit int) ([]cktui.Row, error)
 			Author:    fmt.Sprint(value["author_id"]),
 			Title:     firstDisplay(value["moment_id"], "moment"),
 			Text:      fmt.Sprint(value["text"]),
+			Detail:    tuiDetail("author", fmt.Sprint(value["author_id"])),
+			URL:       firstURLFromText(fmt.Sprint(value["text"])),
 			CreatedAt: fmt.Sprint(value["created_at"]),
+			Tags:      tuiTags("moment", value["author_id"]),
+			Fields: tuiRowFields(
+				"author_id", fmt.Sprint(value["author_id"]),
+			),
 		})
 	}
 	return rows, nil
@@ -1579,6 +1628,60 @@ func firstDisplay(values ...any) string {
 		text := strings.TrimSpace(fmt.Sprint(value))
 		if text != "" && text != "<nil>" {
 			return text
+		}
+	}
+	return ""
+}
+
+func tuiRowFields(pairs ...string) map[string]string {
+	fields := map[string]string{}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		key := strings.TrimSpace(pairs[i])
+		value := strings.TrimSpace(pairs[i+1])
+		if key != "" && value != "" && value != "<nil>" && value != "0" {
+			fields[key] = value
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func tuiTags(values ...any) []string {
+	var tags []string
+	seen := map[string]bool{}
+	for _, value := range values {
+		tag := strings.TrimSpace(fmt.Sprint(value))
+		if tag == "" || tag == "<nil>" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	return tags
+}
+
+func tuiDetail(pairs ...string) string {
+	var parts []string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		key := strings.TrimSpace(pairs[i])
+		value := strings.TrimSpace(pairs[i+1])
+		if key == "" || value == "" || value == "<nil>" {
+			continue
+		}
+		parts = append(parts, key+"="+value)
+	}
+	return strings.Join(parts, "  ")
+}
+
+var tuiURLRE = regexp.MustCompile(`https?://[^\s<>"')\]]+`)
+
+func firstURLFromText(values ...string) string {
+	for _, value := range values {
+		match := tuiURLRE.FindString(value)
+		if match != "" {
+			return strings.TrimRight(match, ".,;:!?")
 		}
 	}
 	return ""

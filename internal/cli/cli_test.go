@@ -270,6 +270,22 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 			t.Fatalf("tui kind %s = %d, counts=%#v", prefix, tuiKinds[prefix], tuiKinds)
 		}
 	}
+	tuiRows := readTUIRows(t, out.Bytes())
+	messageRow := findTUIRow(t, tuiRows, "id", "m2")
+	if got := fmt.Sprint(messageRow["url"]); got != "https://example.invalid/boarding" {
+		t.Fatalf("message tui url = %q row=%#v", got, messageRow)
+	}
+	if fields := messageRow["fields"].(map[string]any); fmt.Sprint(fields["chat_id"]) != "chat-1" {
+		t.Fatalf("message tui fields = %#v", fields)
+	}
+	favoriteRow := findTUIRow(t, tuiRows, "id", "fav-1")
+	if got := fmt.Sprint(favoriteRow["url"]); got != "https://example.invalid/boarding" {
+		t.Fatalf("favorite tui url = %q row=%#v", got, favoriteRow)
+	}
+	mediaRow := findTUIRow(t, tuiRows, "url", copiedMedia)
+	if got := fmt.Sprint(mediaRow["url"]); got != copiedMedia {
+		t.Fatalf("media tui url = %q want %q row=%#v", got, copiedMedia, mediaRow)
+	}
 
 	markdownDir := filepath.Join(root, "markdown")
 	code, out, errOut = runForTest("--json", "export", "--format", "markdown", "--out", markdownDir)
@@ -1099,6 +1115,23 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	if got := len(moments["values"].([]any)); got != 1 {
 		t.Fatalf("moments values = %d, payload=%#v", got, moments)
 	}
+	code, out, errOut = runForTest("--json", "tui", "--scope", "all", "--limit", "20")
+	if code != 0 {
+		t.Fatalf("native tui code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	tuiRows := readTUIRows(t, out.Bytes())
+	articleRow := findTUIRowWhere(t, tuiRows, func(row map[string]any) bool {
+		return row["kind"] == "article" && row["url"] == "https://example.invalid/native"
+	})
+	if got := fmt.Sprint(articleRow["kind"]); got != "article" {
+		t.Fatalf("native article tui kind = %q row=%#v", got, articleRow)
+	}
+	mediaRow := findTUIRowWhere(t, tuiRows, func(row map[string]any) bool {
+		return strings.HasPrefix(fmt.Sprint(row["kind"]), "media:") && row["url"] == "https://example.invalid/native"
+	})
+	if got := fmt.Sprint(mediaRow["kind"]); !strings.HasPrefix(got, "media:") {
+		t.Fatalf("native media tui kind = %q row=%#v", got, mediaRow)
+	}
 	code, out, errOut = runForTest("--json", "raw-records")
 	if code != 0 {
 		t.Fatalf("raw-records code=%d stderr=%s stdout=%s", code, errOut, out)
@@ -1512,10 +1545,7 @@ func doctorCheck(t *testing.T, doctor map[string]any, id string) map[string]any 
 
 func readTUIKindCounts(t *testing.T, data []byte) map[string]int {
 	t.Helper()
-	var rows []map[string]any
-	if err := json.Unmarshal(data, &rows); err != nil {
-		t.Fatal(err)
-	}
+	rows := readTUIRows(t, data)
 	counts := map[string]int{}
 	for _, row := range rows {
 		kind := fmt.Sprint(row["kind"])
@@ -1531,6 +1561,37 @@ func readTUIKindCounts(t *testing.T, data []byte) map[string]int {
 		}
 	}
 	return counts
+}
+
+func readTUIRows(t *testing.T, data []byte) []map[string]any {
+	t.Helper()
+	var rows []map[string]any
+	if err := json.Unmarshal(data, &rows); err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+func findTUIRow(t *testing.T, rows []map[string]any, key, value string) map[string]any {
+	t.Helper()
+	for _, row := range rows {
+		if fmt.Sprint(row[key]) == value {
+			return row
+		}
+	}
+	t.Fatalf("missing tui row %s=%q in %#v", key, value, rows)
+	return nil
+}
+
+func findTUIRowWhere(t *testing.T, rows []map[string]any, match func(map[string]any) bool) map[string]any {
+	t.Helper()
+	for _, row := range rows {
+		if match(row) {
+			return row
+		}
+	}
+	t.Fatalf("missing matching tui row in %#v", rows)
+	return nil
 }
 
 func searchEntitySet(hits []any) map[string]bool {
