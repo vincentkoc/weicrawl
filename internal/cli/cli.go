@@ -729,6 +729,9 @@ func (e env) runSQL(args []string) error {
 	if query == "" {
 		return output.UsageError{Err: errors.New("sql query is required")}
 	}
+	if !isReadOnlySQL(query) {
+		return output.UsageError{Err: errors.New("sql is read-only; use select, with, or read-only pragma statements")}
+	}
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
@@ -739,6 +742,46 @@ func (e env) runSQL(args []string) error {
 		return err
 	}
 	return e.write("sql", result)
+}
+
+func isReadOnlySQL(query string) bool {
+	q := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(query, ";")))
+	if q == "" {
+		return false
+	}
+	for _, token := range []string{"insert", "update", "delete", "replace", "drop", "alter", "create", "vacuum", "attach", "detach", "reindex"} {
+		if containsSQLToken(q, token) {
+			return false
+		}
+	}
+	return strings.HasPrefix(q, "select ") || q == "select" || strings.HasPrefix(q, "with ") || isReadOnlyPragma(q)
+}
+
+func containsSQLToken(query, token string) bool {
+	for _, part := range strings.FieldsFunc(query, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_')
+	}) {
+		if part == token {
+			return true
+		}
+	}
+	return false
+}
+
+func isReadOnlyPragma(query string) bool {
+	if !strings.HasPrefix(query, "pragma ") {
+		return false
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(query, "pragma "))
+	if i := strings.IndexAny(name, "( ="); i >= 0 {
+		name = name[:i]
+	}
+	switch name {
+	case "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "database_list", "foreign_key_list", "quick_check", "integrity_check", "compile_options":
+		return true
+	default:
+		return false
+	}
 }
 
 func (e env) runSnapshot(args []string) error {

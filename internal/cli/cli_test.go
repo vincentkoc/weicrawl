@@ -463,6 +463,35 @@ func TestOfficialAccountSyncSkipsWithoutCredentials(t *testing.T) {
 	}
 }
 
+func TestCLISQLIsReadOnly(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	dbPath := filepath.Join(root, "archive.db")
+	code, out, errOut := runForTest("--json", "--db", dbPath, "init")
+	if code != 0 {
+		t.Fatalf("init code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	code, out, errOut = runForTest("--json", "--db", dbPath, "sql", "select count(*) as n from messages")
+	if code != 0 {
+		t.Fatalf("sql select code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload["values"].([]any)) != 1 {
+		t.Fatalf("sql values = %#v", payload)
+	}
+	code, _, errOut = runForTest("--json", "--db", dbPath, "sql", "delete from messages")
+	if code == 0 {
+		t.Fatal("sql delete succeeded without explicit write support")
+	}
+	if !strings.Contains(errOut.String(), "read-only") {
+		t.Fatalf("stderr = %s", errOut.String())
+	}
+}
+
 func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))
