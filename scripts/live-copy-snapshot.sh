@@ -31,6 +31,9 @@ PY
 )"
 if [[ -n "$snapshot_path" ]]; then
   "$weicrawl" --json unlock template --snapshot "$snapshot_path" --out "$workdir/wechat_keys.template.json" > "$workdir/unlock-template.json"
+  if [[ -n "${WEICRAWL_LIVE_KEYS:-}" ]]; then
+    "$weicrawl" --json unlock validate --snapshot "$snapshot_path" --keys "$WEICRAWL_LIVE_KEYS" > "$workdir/unlock-validate.json"
+  fi
 fi
 
 python3 - "$workdir" <<'PY'
@@ -43,6 +46,7 @@ root = pathlib.Path(sys.argv[1])
 doctor = json.loads((root / "doctor.json").read_text())
 sync = json.loads((root / "sync.json").read_text())
 template = json.loads((root / "unlock-template.json").read_text()) if (root / "unlock-template.json").exists() else {}
+validate = json.loads((root / "unlock-validate.json").read_text()) if (root / "unlock-validate.json").exists() else {}
 
 snapshot = sync.get("snapshot_path") or ""
 if not snapshot:
@@ -60,6 +64,7 @@ summary = {
     "snapshot_path": snapshot,
     "manifest_template_path": template.get("manifest_path"),
     "manifest_template_db_count": template.get("db_count"),
+    "manifest_valid": validate.get("available"),
     "source_db_count": sync.get("source_db_count"),
     "snapshot_key_info_db_count": sync.get("key_info_db_count"),
     "encrypted_db_count": desktop.get("encrypted_db_count"),

@@ -869,7 +869,7 @@ func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 	for _, value := range payload["capabilities"].([]any) {
 		capabilities[fmt.Sprint(value)] = true
 	}
-	for _, name := range []string{"desktop-backup", "jsonl-import", "key-manifest-template", "official-account-api", "official-rate-limit-posture", "official-token-metadata-cache", "unlock-sync"} {
+	for _, name := range []string{"desktop-backup", "jsonl-import", "key-manifest-template", "key-manifest-validation", "official-account-api", "official-rate-limit-posture", "official-token-metadata-cache", "unlock-sync"} {
 		if !capabilities[name] {
 			t.Fatalf("capability %q missing: %#v", name, capabilities)
 		}
@@ -1587,6 +1587,39 @@ func TestCLIUnlockTemplateWritesPlaceholderManifest(t *testing.T) {
 	}
 	if !strings.Contains(string(bytes), "REPLACE_WITH_64_HEX_SQLCIPHER_KEY") || strings.Contains(string(bytes), strings.Repeat("0", 64)) {
 		t.Fatalf("template bytes = %s", bytes)
+	}
+}
+
+func TestCLIUnlockValidateReportsMissingKeys(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{"message/message_0.db", "contact/contact.db"} {
+		path := filepath.Join(root, "snapshot", "db_storage", rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("encrypted"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := strings.Repeat("a", 64)
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"keys":{"message/message_0.db":"`+key+`"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runForTest("--json", "unlock", "validate", "--snapshot", filepath.Join(root, "snapshot"), "--keys", keysPath)
+	if code != 0 {
+		t.Fatalf("unlock validate code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["available"].(bool) {
+		t.Fatalf("payload should not be available: %#v", payload)
+	}
+	check := payload["check"].(map[string]any)
+	if missing := check["missing_keys"].([]any); len(missing) != 1 || missing[0].(map[string]any)["database"] != "contact/contact.db" {
+		t.Fatalf("missing_keys = %#v payload=%#v", missing, payload)
 	}
 }
 

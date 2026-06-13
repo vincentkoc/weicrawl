@@ -50,6 +50,7 @@ type KeyReadiness struct {
 	DefaultKey  bool           `json:"default_key,omitempty"`
 	Found       []DecryptEntry `json:"found,omitempty"`
 	Missing     []DecryptEntry `json:"missing,omitempty"`
+	MissingKeys []DecryptEntry `json:"missing_keys,omitempty"`
 	Probed      []DecryptEntry `json:"probed,omitempty"`
 	ProbeFailed []DecryptEntry `json:"probe_failed,omitempty"`
 	ProbeReady  bool           `json:"probe_ready,omitempty"`
@@ -442,11 +443,56 @@ func CheckSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
 	return checkSnapshotKeys(context.Background(), opts, false)
 }
 
+func ValidateSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
+	return validateSnapshotKeys(opts)
+}
+
 func ProbeSnapshotKeys(ctx context.Context, opts DecryptOptions) (KeyReadiness, error) {
 	return checkSnapshotKeys(ctx, opts, true)
 }
 
 func checkSnapshotKeys(ctx context.Context, opts DecryptOptions, probe bool) (KeyReadiness, error) {
+	result, err := validateSnapshotKeys(opts)
+	if err != nil {
+		return result, err
+	}
+	sqlcipher, err := FindSQLCipher(opts.SQLCipherPath)
+	if err != nil {
+		return result, err
+	}
+	result.SQLCipher = sqlcipher
+	if !result.Ready {
+		return result, nil
+	}
+	relPaths := make([]string, 0, len(result.Found))
+	for _, entry := range result.Found {
+		relPaths = append(relPaths, entry.Database)
+	}
+	sort.Strings(relPaths)
+	keys, err := ReadKeyManifest(opts.KeysPath)
+	if err != nil {
+		return result, err
+	}
+	resolved, err := resolveSnapshotKeys(filepath.Join(opts.SnapshotDir, "db_storage"), keys)
+	if err != nil {
+		return result, err
+	}
+	for _, rel := range relPaths {
+		if probe {
+			if err := probeOne(ctx, sqlcipher, filepath.Join(opts.SnapshotDir, "db_storage", rel), resolved[rel]); err != nil {
+				result.ProbeFailed = append(result.ProbeFailed, DecryptEntry{Database: rel, Reason: err.Error()})
+				continue
+			}
+			result.Probed = append(result.Probed, DecryptEntry{Database: rel})
+		}
+	}
+	if probe {
+		result.ProbeReady = result.Ready && len(result.Probed) == len(result.Found) && len(result.ProbeFailed) == 0
+	}
+	return result, nil
+}
+
+func validateSnapshotKeys(opts DecryptOptions) (KeyReadiness, error) {
 	if strings.TrimSpace(opts.SnapshotDir) == "" {
 		return KeyReadiness{}, errors.New("snapshot dir is required")
 	}
@@ -454,14 +500,14 @@ func checkSnapshotKeys(ctx context.Context, opts DecryptOptions, probe bool) (Ke
 	if err != nil {
 		return KeyReadiness{}, err
 	}
-	sqlcipher, err := FindSQLCipher(opts.SQLCipherPath)
-	if err != nil {
-		return KeyReadiness{}, err
-	}
-	result := KeyReadiness{SnapshotDir: opts.SnapshotDir, KeysPath: opts.KeysPath, SQLCipher: sqlcipher, KeyCount: len(keys.Keys)}
+	result := KeyReadiness{SnapshotDir: opts.SnapshotDir, KeysPath: opts.KeysPath, KeyCount: len(keys.Keys)}
 	dbRoot := filepath.Join(opts.SnapshotDir, "db_storage")
 	if _, err := os.Stat(dbRoot); err != nil {
 		return result, fmt.Errorf("stat snapshot db_storage: %w", err)
+	}
+	dbs, err := snapshotDBRelPaths(dbRoot)
+	if err != nil {
+		return result, err
 	}
 	resolved, err := resolveSnapshotKeys(dbRoot, keys)
 	if err != nil {
@@ -481,19 +527,35 @@ func checkSnapshotKeys(ctx context.Context, opts DecryptOptions, probe bool) (Ke
 			continue
 		}
 		result.Found = append(result.Found, DecryptEntry{Database: rel})
-		if probe {
-			if err := probeOne(ctx, sqlcipher, src, resolved[rel]); err != nil {
-				result.ProbeFailed = append(result.ProbeFailed, DecryptEntry{Database: rel, Reason: err.Error()})
-				continue
-			}
-			result.Probed = append(result.Probed, DecryptEntry{Database: rel})
+	}
+	for _, rel := range dbs {
+		if _, ok := resolved[rel]; !ok {
+			result.MissingKeys = append(result.MissingKeys, DecryptEntry{Database: rel, Reason: "key not supplied"})
 		}
 	}
-	result.Ready = len(result.Found) > 0 && len(result.Missing) == 0
-	if probe {
-		result.ProbeReady = result.Ready && len(result.Probed) == len(result.Found) && len(result.ProbeFailed) == 0
-	}
+	result.Ready = len(result.Found) > 0 && len(result.Missing) == 0 && len(result.MissingKeys) == 0
 	return result, nil
+}
+
+func snapshotDBRelPaths(dbRoot string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(dbRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			return nil
+		}
+		rel, err := filepath.Rel(dbRoot, path)
+		if err != nil {
+			return err
+		}
+		rel, err = cleanManifestRel(rel)
+		if err != nil {
+			return err
+		}
+		out = append(out, rel)
+		return nil
+	})
+	sort.Strings(out)
+	return out, err
 }
 
 func resolveSnapshotKeys(dbRoot string, manifest KeyManifest) (map[string]string, error) {

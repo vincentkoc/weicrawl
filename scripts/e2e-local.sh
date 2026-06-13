@@ -180,6 +180,12 @@ fi
 "$weicrawl" --json unlock status > "$tmpdir/unlock-status.json"
 "$weicrawl" --json unlock scan-keys --allow-process-inspect > "$tmpdir/scan-plan.json"
 "$weicrawl" --json unlock template --snapshot "$snapshot_path" --out "$tmpdir/wechat_keys.template.json" > "$tmpdir/unlock-template.json"
+python3 - "$tmpdir/wechat_keys.synthetic.json" <<'PY'
+import json
+import sys
+json.dump({"__default_key": "0" * 64}, open(sys.argv[1], "w"))
+PY
+"$weicrawl" --json unlock validate --snapshot "$snapshot_path" --keys "$tmpdir/wechat_keys.synthetic.json" > "$tmpdir/unlock-validate.json"
 env WEICRAWL_WECHAT_APP_ID=official-app \
   WEICRAWL_WECHAT_APP_SECRET=official-secret \
   WEICRAWL_WECHAT_API_BASE_URL="$official_base_url" \
@@ -237,6 +243,12 @@ if not template_path.exists():
 template_text = template_path.read_text()
 if "REPLACE_WITH_64_HEX_SQLCIPHER_KEY" not in template_text:
     raise SystemExit("unlock template missing placeholder")
+
+validate = payloads["unlock-validate"]
+if not validate.get("available"):
+    raise SystemExit(f"synthetic default-key manifest should cover copied DBs: {validate}")
+if validate.get("check", {}).get("key_count") != template.get("db_count"):
+    raise SystemExit(f"validate/template DB count mismatch: validate={validate} template={template}")
 
 status = payloads["status"]
 if status.get("control", {}).get("state") != "ok":

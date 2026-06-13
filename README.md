@@ -110,6 +110,10 @@ go run ./cmd/weicrawl --json unlock template \
   --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile> \
   --out ./wechat_keys.template.json
 
+go run ./cmd/weicrawl --json unlock validate \
+  --keys ./wechat_keys.json \
+  --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile>
+
 go run ./cmd/weicrawl --json unlock desktop \
   --explain \
   --probe-decrypt \
@@ -148,6 +152,8 @@ supplied keys and reports whether the keys actually work.
 `unlock template` writes a placeholder manifest for every copied
 `db_storage/*.db` path in a retained snapshot. It is not valid key material; it
 is a review aid for external extractors to fill with real 64-hex SQLCipher keys.
+`unlock validate` checks that a filled manifest covers every copied DB before
+you spend time on SQLCipher probing or decrypting.
 
 `wechat_keys.json` may either map individual copied database paths to keys or
 provide one profile key:

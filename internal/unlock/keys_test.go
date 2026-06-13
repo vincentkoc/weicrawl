@@ -162,6 +162,56 @@ func TestWriteKeyManifestTemplate(t *testing.T) {
 	}
 }
 
+func TestValidateSnapshotKeysReportsMissingKeys(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{"message/message_0.db", "contact/contact.db"} {
+		path := filepath.Join(root, "snapshot", "db_storage", rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("encrypted"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"keys":{"message/message_0.db":"`+key+`"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check, err := ValidateSnapshotKeys(DecryptOptions{SnapshotDir: filepath.Join(root, "snapshot"), KeysPath: keysPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if check.Ready || len(check.Found) != 1 || len(check.MissingKeys) != 1 || check.MissingKeys[0].Database != "contact/contact.db" {
+		t.Fatalf("check = %#v", check)
+	}
+}
+
+func TestValidateSnapshotKeysAcceptsCompleteDefaultKey(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{"message/message_0.db", "contact/contact.db"} {
+		path := filepath.Join(root, "snapshot", "db_storage", rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("encrypted"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	keysPath := filepath.Join(root, "wechat_keys.json")
+	if err := os.WriteFile(keysPath, []byte(`{"__default_key":"`+key+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check, err := ValidateSnapshotKeys(DecryptOptions{SnapshotDir: filepath.Join(root, "snapshot"), KeysPath: keysPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !check.Ready || !check.DefaultKey || check.KeyCount != 2 || len(check.Found) != 2 || len(check.MissingKeys) != 0 {
+		t.Fatalf("check = %#v", check)
+	}
+}
+
 func TestWriteDefaultKeyManifestFromScanAcceptsExistingManifest(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "wechat_keys.json")

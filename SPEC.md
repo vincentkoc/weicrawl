@@ -565,6 +565,7 @@ Subcommands:
 - `unlock forget --profile <id-or-wxid>`
 - `unlock status`
 - `unlock template --snapshot <copied-profile-root> --out <manifest-template>`
+- `unlock validate --keys <manifest> --snapshot <copied-profile-root>`
 
 Flags:
 
@@ -593,6 +594,9 @@ failure without exporting plaintext.
 0600 placeholder manifest enumerating every copied `db_storage/*.db` path plus
 copied `key_info/` metadata. The template must not contain real keys and must
 not be accepted as a filled manifest until placeholders are replaced.
+`unlock validate` should parse a filled manifest, resolve live/scanner/copied
+paths to copied snapshot-relative DB paths, and report missing DB keys without
+requiring `sqlcipher`.
 
 `unlock desktop --sync` should ingest the decrypted output into the configured
 archive immediately after decrypting the copied snapshot. It must still require

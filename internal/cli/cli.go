@@ -871,6 +871,27 @@ func (e env) runUnlock(args []string) error {
 			"placeholder":    "REPLACE_WITH_64_HEX_SQLCIPHER_KEY",
 			"next":           "fill the template with reviewed key material, then run `weicrawl unlock desktop --explain --probe-decrypt --keys <manifest> --snapshot <copied-profile-root>`",
 		})
+	case "validate":
+		if strings.TrimSpace(*keysPath) == "" || strings.TrimSpace(*snapshotPath) == "" {
+			return output.UsageError{Err: errors.New("unlock validate requires --keys and --snapshot")}
+		}
+		check, err := unlock.ValidateSnapshotKeys(unlock.DecryptOptions{
+			SnapshotDir: config.Expand(*snapshotPath),
+			KeysPath:    config.Expand(*keysPath),
+		})
+		if err != nil {
+			return err
+		}
+		return e.write("unlock", map[string]any{
+			"subcommand":  sub,
+			"method":      "key-manifest-validate",
+			"app_version": disc.AppVersion,
+			"profile":     *profile,
+			"persisted":   false,
+			"available":   check.Ready,
+			"check":       check,
+			"next":        "if available is true, run `weicrawl unlock desktop --explain --probe-decrypt --keys <manifest> --snapshot <copied-profile-root>`",
+		})
 	case "forget":
 		payload["forgotten"] = false
 		payload["available"] = false
@@ -1922,6 +1943,7 @@ func manifest() control.Manifest {
 		"desktop-backup",
 		"decrypted-db-import",
 		"key-manifest-template",
+		"key-manifest-validation",
 		"unlock-sync",
 		"fts-search",
 		"jsonl-import",
