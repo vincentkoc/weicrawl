@@ -264,12 +264,14 @@ func importNativeDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profi
 	if err != nil {
 		return result, err
 	}
+	importedTables := map[string]bool{}
 	if tables["contact"] && hasColumns(columns["contact"], "username") {
 		n, err := importContactTable(ctx, arc, db, profileID, "contact", "user")
 		if err != nil {
 			return result, err
 		}
 		result.Contacts += n
+		importedTables["contact"] = true
 	}
 	if tables["stranger"] && hasColumns(columns["stranger"], "username") {
 		n, err := importContactTable(ctx, arc, db, profileID, "stranger", "user")
@@ -277,6 +279,7 @@ func importNativeDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profi
 			return result, err
 		}
 		result.Contacts += n
+		importedTables["stranger"] = true
 	}
 	if tables["SessionTable"] && hasColumns(columns["SessionTable"], "username") {
 		n, err := importSessionTable(ctx, arc, db, profileID)
@@ -284,6 +287,7 @@ func importNativeDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profi
 			return result, err
 		}
 		result.Chats += n
+		importedTables["SessionTable"] = true
 	}
 	if tables["Name2Id"] && hasColumns(columns["Name2Id"], "user_name") {
 		counts, err := importMessageTables(ctx, arc, db, profileID, file, tables, opts)
@@ -291,8 +295,19 @@ func importNativeDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profi
 			return result, err
 		}
 		result.add(counts)
+		importedTables["Name2Id"] = true
 	}
-	n, err := importRawUnsupportedTables(ctx, arc, db, profileID, file, tables)
+	counts, err := importNativeFavoriteTables(ctx, arc, db, profileID, file, tables, columns, opts, importedTables)
+	if err != nil {
+		return result, err
+	}
+	result.add(counts)
+	counts, err = importNativeMomentTables(ctx, arc, db, profileID, file, tables, columns, opts, importedTables)
+	if err != nil {
+		return result, err
+	}
+	result.add(counts)
+	n, err := importRawUnsupportedTables(ctx, arc, db, profileID, file, tables, importedTables)
 	if err != nil {
 		return result, err
 	}
@@ -581,6 +596,131 @@ func extractRichMessagePayload(content string) richMessagePayload {
 	return payload
 }
 
+func importNativeFavoriteTables(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, tables map[string]bool, columns map[string]map[string]bool, opts Options, importedTables map[string]bool) (Result, error) {
+	var result Result
+	for table := range tables {
+		cols := columns[table]
+		if !isNativeFavoriteTable(table, cols) {
+			continue
+		}
+		rows, err := queryRowsAsMaps(ctx, db, table)
+		if err != nil {
+			return result, err
+		}
+		for i, row := range rows {
+			observedAt := nativeTimestamp(row, "updated_at", "modify_time", "create_time", "timestamp", "time")
+			if !includeSince(observedAt, opts.Since) {
+				continue
+			}
+			title := nativeString(row, "title", "fav_title", "source_title", "name")
+			text := nativeString(row, "text", "content", "desc", "description", "summary")
+			sourceRef := nativeString(row, "source_ref", "message_id", "msg_id", "src_id", "source_id")
+			raw := map[string]any{"source_db": filepath.Base(file.Path), "source_role": file.Role, "source_table": table, "row": row}
+			rawJSON, _ := json.Marshal(raw)
+			favoriteID := firstNonEmpty(nativeString(row, "favorite_id", "fav_id", "local_id", "id"), stableID("native-favorite", profileID, table, strconv.Itoa(i), title, text, sourceRef))
+			if err := arc.UpsertFavorite(ctx, archive.Favorite{
+				ProfileID:  profileID,
+				FavoriteID: favoriteID,
+				Kind:       firstNonEmpty(nativeString(row, "kind", "type", "fav_type"), "native"),
+				Title:      title,
+				Text:       text,
+				SourceRef:  sourceRef,
+				RawJSON:    string(rawJSON),
+			}); err != nil {
+				return result, err
+			}
+			result.Favorites++
+		}
+		importedTables[table] = true
+	}
+	return result, nil
+}
+
+func importNativeMomentTables(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, tables map[string]bool, columns map[string]map[string]bool, opts Options, importedTables map[string]bool) (Result, error) {
+	var result Result
+	for table := range tables {
+		cols := columns[table]
+		if !isNativeMomentTable(table, cols) {
+			continue
+		}
+		rows, err := queryRowsAsMaps(ctx, db, table)
+		if err != nil {
+			return result, err
+		}
+		for i, row := range rows {
+			createdAt := nativeTimestamp(row, "created_at", "create_time", "timestamp", "time")
+			if !includeSince(createdAt, opts.Since) {
+				continue
+			}
+			text := nativeString(row, "text", "content", "description", "desc", "summary")
+			author := nativeString(row, "author_id", "username", "user_name", "sender", "from_user")
+			raw := map[string]any{"source_db": filepath.Base(file.Path), "source_role": file.Role, "source_table": table, "row": row}
+			rawJSON, _ := json.Marshal(raw)
+			momentID := firstNonEmpty(nativeString(row, "moment_id", "sns_id", "feed_id", "local_id", "id"), stableID("native-moment", profileID, table, strconv.Itoa(i), author, text, createdAt))
+			if err := arc.UpsertMoment(ctx, archive.Moment{
+				ProfileID: profileID,
+				MomentID:  momentID,
+				AuthorID:  author,
+				Text:      text,
+				CreatedAt: createdAt,
+				RawJSON:   string(rawJSON),
+			}); err != nil {
+				return result, err
+			}
+			result.Moments++
+		}
+		importedTables[table] = true
+	}
+	return result, nil
+}
+
+func isNativeFavoriteTable(table string, cols map[string]bool) bool {
+	lower := strings.ToLower(table)
+	if strings.HasPrefix(lower, "weicrawl_fixture_") || !(strings.Contains(lower, "fav") || strings.Contains(lower, "favorite") || strings.Contains(lower, "collect")) {
+		return false
+	}
+	return hasAnyColumn(cols, "favorite_id", "fav_id", "local_id", "id") &&
+		hasAnyColumn(cols, "title", "fav_title", "source_title", "name", "text", "content", "desc", "description", "summary")
+}
+
+func isNativeMomentTable(table string, cols map[string]bool) bool {
+	lower := strings.ToLower(table)
+	if strings.HasPrefix(lower, "weicrawl_fixture_") || !(strings.Contains(lower, "moment") || strings.Contains(lower, "timeline") || strings.Contains(lower, "sns")) {
+		return false
+	}
+	return hasAnyColumn(cols, "moment_id", "sns_id", "feed_id", "local_id", "id") &&
+		hasAnyColumn(cols, "text", "content", "description", "desc", "summary")
+}
+
+func queryRowsAsMaps(ctx context.Context, db *sql.DB, table string) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, `select * from `+quoteIdent(table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	for rows.Next() {
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		row := map[string]any{}
+		for i, col := range cols {
+			row[col] = normalizeDBValue(values[i])
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func tableSet(ctx context.Context, db *sql.DB) (map[string]bool, error) {
 	rows, err := db.QueryContext(ctx, `select name from sqlite_master where type in ('table','view')`)
 	if err != nil {
@@ -598,10 +738,10 @@ func tableSet(ctx context.Context, db *sql.DB) (map[string]bool, error) {
 	return out, rows.Err()
 }
 
-func importRawUnsupportedTables(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, tables map[string]bool) (int64, error) {
+func importRawUnsupportedTables(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, tables map[string]bool, importedTables map[string]bool) (int64, error) {
 	var n int64
 	for table := range tables {
-		if skipRawTable(table) {
+		if skipRawTable(table) || importedTables[table] {
 			continue
 		}
 		rows, err := db.QueryContext(ctx, `select * from `+quoteIdent(table))
@@ -705,6 +845,47 @@ func hasColumns(cols map[string]bool, names ...string) bool {
 		}
 	}
 	return true
+}
+
+func hasAnyColumn(cols map[string]bool, names ...string) bool {
+	for _, name := range names {
+		if cols[name] {
+			return true
+		}
+	}
+	return false
+}
+
+func nativeString(row map[string]any, names ...string) string {
+	for _, name := range names {
+		value, ok := row[name]
+		if !ok || value == nil {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func nativeTimestamp(row map[string]any, names ...string) string {
+	value := nativeString(row, names...)
+	if value == "" {
+		return ""
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t.UTC().Format(time.RFC3339)
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || n <= 0 {
+		return value
+	}
+	if n > 1000000000000 {
+		n = n / 1000
+	}
+	return unixSeconds(n)
 }
 
 func messageTableName(username string) string {

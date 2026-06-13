@@ -853,6 +853,12 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	if got := int(payload["imported_articles"].(float64)); got != 1 {
 		t.Fatalf("imported_articles = %d, payload=%#v", got, payload)
 	}
+	if got := int(payload["imported_favorites"].(float64)); got != 1 {
+		t.Fatalf("imported_favorites = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_moments"].(float64)); got != 1 {
+		t.Fatalf("imported_moments = %d, payload=%#v", got, payload)
+	}
 	if got := int(payload["imported_raw_records"].(float64)); got != 1 {
 		t.Fatalf("imported_raw_records = %d, payload=%#v", got, payload)
 	}
@@ -877,6 +883,28 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	}
 	if got := len(media["values"].([]any)); got != 1 {
 		t.Fatalf("media values = %d, payload=%#v", got, media)
+	}
+	code, out, errOut = runForTest("--json", "favorites")
+	if code != 0 {
+		t.Fatalf("favorites code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var favorites map[string]any
+	if err := json.Unmarshal(out.Bytes(), &favorites); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(favorites["values"].([]any)); got != 1 {
+		t.Fatalf("favorites values = %d, payload=%#v", got, favorites)
+	}
+	code, out, errOut = runForTest("--json", "moments")
+	if code != 0 {
+		t.Fatalf("moments code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var moments map[string]any
+	if err := json.Unmarshal(out.Bytes(), &moments); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(moments["values"].([]any)); got != 1 {
+		t.Fatalf("moments values = %d, payload=%#v", got, moments)
 	}
 	code, out, errOut = runForTest("--json", "raw-records")
 	if code != 0 {
@@ -1161,6 +1189,8 @@ insert into Name2Id values(?);`, username)
 		t.Fatal(err)
 	}
 	_, err = db.Exec(`create table "` + table + `"(local_id integer, local_type integer, create_time integer, real_sender_id text, message_content text, source text);
+create table FavoriteTable(local_id text, type text, title text, content text, source_ref text, create_time integer);
+create table SnsTimeline(sns_id text, user_name text, content text, create_time integer);
 create table NativeExtra(id text, body text);
 insert into NativeExtra values('extra-1', 'preserve me');`)
 	if err != nil {
@@ -1170,7 +1200,9 @@ insert into NativeExtra values('extra-1', 'preserve me');`)
 	imageXML := `<msg><img cdnthumburl="https://example.invalid/native-thumb.jpg"></img></msg>`
 	_, err = db.Exec(`insert into "`+table+`" values(7, 1, 1781323200, 'alice', 'native hello from decrypted shape', '0');
 insert into "`+table+`" values(8, 49, 1781323300, 'alice', ?, '0');
-insert into "`+table+`" values(9, 3, 1781323400, 'alice', ?, '0');`, linkXML, imageXML)
+insert into "`+table+`" values(9, 3, 1781323400, 'alice', ?, '0');
+insert into FavoriteTable values('fav-native-1', 'message', 'Native favorite', 'native favorite text', 'message:8', 1781323500);
+insert into SnsTimeline values('sns-native-1', 'alice', 'native moment text', 1781323600);`, linkXML, imageXML)
 	if err != nil {
 		t.Fatal(err)
 	}
