@@ -106,6 +106,10 @@ go run ./cmd/weicrawl --json sync \
   --source desktop-macos \
   --keep-source-snapshot
 
+go run ./cmd/weicrawl --json unlock template \
+  --snapshot ~/.cache/weicrawl/snapshots/<run-id>/<profile> \
+  --out ./wechat_keys.template.json
+
 go run ./cmd/weicrawl --json unlock desktop \
   --explain \
   --probe-decrypt \
@@ -140,6 +144,10 @@ reducing it to a single default key.
 `unlock desktop --explain --probe-decrypt` is still read-only and does not write
 plaintext DBs. It asks `sqlcipher` to open the copied snapshot DBs with the
 supplied keys and reports whether the keys actually work.
+
+`unlock template` writes a placeholder manifest for every copied
+`db_storage/*.db` path in a retained snapshot. It is not valid key material; it
+is a review aid for external extractors to fill with real 64-hex SQLCipher keys.
 
 `wechat_keys.json` may either map individual copied database paths to keys or
 provide one profile key:

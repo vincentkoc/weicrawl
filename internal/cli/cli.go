@@ -849,6 +849,28 @@ func (e env) runUnlock(args []string) error {
 		scanPayload["redacted"] = redacted
 		scanPayload["next"] = "run `weicrawl unlock desktop --explain --probe-decrypt --keys <manifest> --snapshot <copied-profile-root>`"
 		return e.write("unlock", scanPayload)
+	case "template":
+		if strings.TrimSpace(*snapshotPath) == "" || strings.TrimSpace(*outDir) == "" {
+			return output.UsageError{Err: errors.New("unlock template requires --snapshot and --out")}
+		}
+		template, err := unlock.WriteKeyManifestTemplate(config.Expand(*snapshotPath), config.Expand(*outDir))
+		if err != nil {
+			return err
+		}
+		return e.write("unlock", map[string]any{
+			"subcommand":     sub,
+			"method":         "key-manifest-template",
+			"app_version":    disc.AppVersion,
+			"profile":        *profile,
+			"persisted":      false,
+			"snapshot":       template.SnapshotDir,
+			"manifest_path":  template.OutputPath,
+			"db_count":       template.DBCount,
+			"key_info_count": template.KeyInfoCount,
+			"key_info":       template.KeyInfo,
+			"placeholder":    "REPLACE_WITH_64_HEX_SQLCIPHER_KEY",
+			"next":           "fill the template with reviewed key material, then run `weicrawl unlock desktop --explain --probe-decrypt --keys <manifest> --snapshot <copied-profile-root>`",
+		})
 	case "forget":
 		payload["forgotten"] = false
 		payload["available"] = false
@@ -1899,6 +1921,7 @@ func manifest() control.Manifest {
 		"desktop-snapshot",
 		"desktop-backup",
 		"decrypted-db-import",
+		"key-manifest-template",
 		"unlock-sync",
 		"fts-search",
 		"jsonl-import",

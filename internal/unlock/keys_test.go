@@ -3,6 +3,7 @@ package unlock
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,6 +116,49 @@ func TestWriteDefaultKeyManifestFromScan(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("manifest mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestWriteKeyManifestTemplate(t *testing.T) {
+	root := t.TempDir()
+	snapshotDB := filepath.Join(root, "snapshot", "db_storage", "message", "message_0.db")
+	keyInfoDB := filepath.Join(root, "snapshot", "key_info", "wxid_fixture", "key_info.db")
+	for _, path := range []string{snapshotDB, keyInfoDB} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outPath := filepath.Join(root, "wechat_keys.template.json")
+	template, err := WriteKeyManifestTemplate(filepath.Join(root, "snapshot"), outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if template.DBCount != 1 || template.KeyInfoCount != 1 || template.Keys["message/message_0.db"] != keyManifestPlaceholder {
+		t.Fatalf("template = %#v", template)
+	}
+	info, err := os.Stat(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("template mode = %o", info.Mode().Perm())
+	}
+	var raw map[string]any
+	bytes, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(bytes, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["__placeholder"] != keyManifestPlaceholder {
+		t.Fatalf("raw template = %#v", raw)
+	}
+	if _, err := ReadKeyManifest(outPath); err == nil {
+		t.Fatal("template should not be accepted as a filled key manifest")
 	}
 }
 

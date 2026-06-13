@@ -23,6 +23,16 @@ else
   "$weicrawl" --json sync --source desktop-macos --keep-source-snapshot > "$workdir/sync.json"
 fi
 
+snapshot_path="$(python3 - "$workdir/sync.json" <<'PY'
+import json
+import sys
+print(json.load(open(sys.argv[1])).get("snapshot_path", ""))
+PY
+)"
+if [[ -n "$snapshot_path" ]]; then
+  "$weicrawl" --json unlock template --snapshot "$snapshot_path" --out "$workdir/wechat_keys.template.json" > "$workdir/unlock-template.json"
+fi
+
 python3 - "$workdir" <<'PY'
 import json
 import os
@@ -32,6 +42,7 @@ import sys
 root = pathlib.Path(sys.argv[1])
 doctor = json.loads((root / "doctor.json").read_text())
 sync = json.loads((root / "sync.json").read_text())
+template = json.loads((root / "unlock-template.json").read_text()) if (root / "unlock-template.json").exists() else {}
 
 snapshot = sync.get("snapshot_path") or ""
 if not snapshot:
@@ -47,6 +58,8 @@ summary = {
     "profile": sync.get("profile_id"),
     "status": sync.get("status"),
     "snapshot_path": snapshot,
+    "manifest_template_path": template.get("manifest_path"),
+    "manifest_template_db_count": template.get("db_count"),
     "source_db_count": sync.get("source_db_count"),
     "snapshot_key_info_db_count": sync.get("key_info_db_count"),
     "encrypted_db_count": desktop.get("encrypted_db_count"),

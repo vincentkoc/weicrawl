@@ -162,9 +162,24 @@ official_base_url="$(cat "$tmpdir/official-api-url")"
 "$weicrawl" --json doctor > "$tmpdir/doctor.json"
 env -u WEICRAWL_WECHAT_APP_ID -u WEICRAWL_WECHAT_APP_SECRET \
   "$weicrawl" --json sync --source all --keep-source-snapshot > "$tmpdir/sync-all.json"
+snapshot_path="$(python3 - "$tmpdir/sync-all.json" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1]))
+for item in payload.get("results", []):
+    if item.get("source") == "desktop-macos" and item.get("snapshot_path"):
+        print(item["snapshot_path"])
+        break
+PY
+)"
+if [[ -z "$snapshot_path" ]]; then
+  echo "desktop sync did not produce a retained snapshot" >&2
+  exit 1
+fi
 "$weicrawl" --json status > "$tmpdir/status.json"
 "$weicrawl" --json unlock status > "$tmpdir/unlock-status.json"
 "$weicrawl" --json unlock scan-keys --allow-process-inspect > "$tmpdir/scan-plan.json"
+"$weicrawl" --json unlock template --snapshot "$snapshot_path" --out "$tmpdir/wechat_keys.template.json" > "$tmpdir/unlock-template.json"
 env WEICRAWL_WECHAT_APP_ID=official-app \
   WEICRAWL_WECHAT_APP_SECRET=official-secret \
   WEICRAWL_WECHAT_API_BASE_URL="$official_base_url" \
@@ -212,6 +227,16 @@ if "per-database keys" not in notes:
     raise SystemExit(f"scan plan does not mention per-database keys: {scan}")
 if not isinstance(scan.get("wechat_running"), bool):
     raise SystemExit(f"scan plan did not report wechat_running: {scan}")
+
+template = payloads["unlock-template"]
+if template.get("method") != "key-manifest-template" or template.get("db_count", 0) <= 0:
+    raise SystemExit(f"unlock template did not enumerate copied DBs: {template}")
+template_path = root / "wechat_keys.template.json"
+if not template_path.exists():
+    raise SystemExit("unlock template file was not written")
+template_text = template_path.read_text()
+if "REPLACE_WITH_64_HEX_SQLCIPHER_KEY" not in template_text:
+    raise SystemExit("unlock template missing placeholder")
 
 status = payloads["status"]
 if status.get("control", {}).get("state") != "ok":

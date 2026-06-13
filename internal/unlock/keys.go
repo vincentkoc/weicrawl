@@ -64,6 +64,17 @@ type KeyScanPlan struct {
 	Notes      []string `json:"notes,omitempty"`
 }
 
+type KeyManifestTemplate struct {
+	SnapshotDir  string            `json:"snapshot_dir"`
+	OutputPath   string            `json:"output_path"`
+	DBCount      int               `json:"db_count"`
+	KeyInfoCount int               `json:"key_info_count"`
+	Keys         map[string]string `json:"keys"`
+	KeyInfo      []string          `json:"key_info,omitempty"`
+}
+
+const keyManifestPlaceholder = "REPLACE_WITH_64_HEX_SQLCIPHER_KEY"
+
 func BuildKeyScanPlan(allowProcessInspect, execute bool, scriptPath, outputPath string) (KeyScanPlan, error) {
 	plan := KeyScanPlan{
 		Allowed: allowProcessInspect,
@@ -89,6 +100,84 @@ func BuildKeyScanPlan(allowProcessInspect, execute bool, scriptPath, outputPath 
 	plan.Notes = append(plan.Notes, "run from the key extractor directory or pass --script")
 	plan.Notes = append(plan.Notes, "expected output: "+outputPath)
 	return plan, nil
+}
+
+func WriteKeyManifestTemplate(snapshotDir, outputPath string) (KeyManifestTemplate, error) {
+	snapshotDir = strings.TrimSpace(snapshotDir)
+	if snapshotDir == "" {
+		return KeyManifestTemplate{}, errors.New("snapshot dir is required")
+	}
+	outputPath = strings.TrimSpace(outputPath)
+	if outputPath == "" {
+		return KeyManifestTemplate{}, errors.New("output path is required")
+	}
+	dbRoot := filepath.Join(snapshotDir, "db_storage")
+	if _, err := os.Stat(dbRoot); err != nil {
+		return KeyManifestTemplate{}, fmt.Errorf("stat snapshot db_storage: %w", err)
+	}
+	template := KeyManifestTemplate{
+		SnapshotDir: snapshotDir,
+		OutputPath:  outputPath,
+		Keys:        map[string]string{},
+	}
+	if err := filepath.WalkDir(dbRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			return nil
+		}
+		rel, err := filepath.Rel(dbRoot, path)
+		if err != nil {
+			return err
+		}
+		rel, err = cleanManifestRel(rel)
+		if err != nil {
+			return err
+		}
+		template.Keys[rel] = keyManifestPlaceholder
+		return nil
+	}); err != nil {
+		return template, err
+	}
+	keyInfoRoot := filepath.Join(snapshotDir, "key_info")
+	_ = filepath.WalkDir(keyInfoRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			return nil
+		}
+		rel, err := filepath.Rel(keyInfoRoot, path)
+		if err != nil {
+			return nil
+		}
+		if rel, err = cleanManifestRel(rel); err == nil {
+			template.KeyInfo = append(template.KeyInfo, rel)
+		}
+		return nil
+	})
+	sort.Strings(template.KeyInfo)
+	template.DBCount = len(template.Keys)
+	template.KeyInfoCount = len(template.KeyInfo)
+	if template.DBCount == 0 {
+		return template, errors.New("snapshot did not contain copied db_storage .db files")
+	}
+	if dir := filepath.Dir(outputPath); dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return template, err
+		}
+	}
+	bytes, err := json.MarshalIndent(map[string]any{
+		"__snapshot":       snapshotDir,
+		"__generated_by":   "weicrawl unlock template",
+		"__placeholder":    keyManifestPlaceholder,
+		"__key_info":       template.KeyInfo,
+		"__key_info_count": template.KeyInfoCount,
+		"keys":             template.Keys,
+	}, "", "  ")
+	if err != nil {
+		return template, err
+	}
+	bytes = append(bytes, '\n')
+	if err := os.WriteFile(outputPath, bytes, 0o600); err != nil {
+		return template, fmt.Errorf("write key manifest template: %w", err)
+	}
+	return template, nil
 }
 
 func keyScanCommand(scriptPath string) []string {

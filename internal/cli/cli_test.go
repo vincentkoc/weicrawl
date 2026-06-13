@@ -869,7 +869,7 @@ func TestMetadataAdvertisesArchiveSurfaces(t *testing.T) {
 	for _, value := range payload["capabilities"].([]any) {
 		capabilities[fmt.Sprint(value)] = true
 	}
-	for _, name := range []string{"desktop-backup", "jsonl-import", "official-account-api", "official-rate-limit-posture", "official-token-metadata-cache", "unlock-sync"} {
+	for _, name := range []string{"desktop-backup", "jsonl-import", "key-manifest-template", "official-account-api", "official-rate-limit-posture", "official-token-metadata-cache", "unlock-sync"} {
 		if !capabilities[name] {
 			t.Fatalf("capability %q missing: %#v", name, capabilities)
 		}
@@ -1554,6 +1554,39 @@ func TestCLIKeyScanRequiresExplicitProcessInspect(t *testing.T) {
 	}
 	if !strings.Contains(fmt.Sprint(nestedPlan["notes"]), "per-database keys") {
 		t.Fatalf("scan plan notes should mention per-database keys: %#v", nestedPlan)
+	}
+}
+
+func TestCLIUnlockTemplateWritesPlaceholderManifest(t *testing.T) {
+	root := t.TempDir()
+	snapshotDB := filepath.Join(root, "snapshot", "db_storage", "message", "message_0.db")
+	keyInfoDB := filepath.Join(root, "snapshot", "key_info", "wxid_fixture", "key_info.db")
+	for _, path := range []string{snapshotDB, keyInfoDB} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outPath := filepath.Join(root, "wechat_keys.template.json")
+	code, out, errOut := runForTest("--json", "unlock", "template", "--snapshot", filepath.Join(root, "snapshot"), "--out", outPath)
+	if code != 0 {
+		t.Fatalf("unlock template code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["method"] != "key-manifest-template" || int(payload["db_count"].(float64)) != 1 || int(payload["key_info_count"].(float64)) != 1 {
+		t.Fatalf("payload = %#v", payload)
+	}
+	bytes, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(bytes), "REPLACE_WITH_64_HEX_SQLCIPHER_KEY") || strings.Contains(string(bytes), strings.Repeat("0", 64)) {
+		t.Fatalf("template bytes = %s", bytes)
 	}
 }
 
