@@ -121,6 +121,16 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if hits := search["hits"].([]any); len(hits) != 1 {
 		t.Fatalf("hits = %#v", hits)
 	}
+	code, out, errOut = runForTest("--json", "search", "--since", "2026-06-13T01:30:00Z", "hello")
+	if code != 0 {
+		t.Fatalf("search since code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	if err := json.Unmarshal(out.Bytes(), &search); err != nil {
+		t.Fatal(err)
+	}
+	if hits := search["hits"].([]any); len(hits) != 0 {
+		t.Fatalf("since hits = %#v", hits)
+	}
 	code, out, errOut = runForTest("--json", "search", "boarding")
 	if code != 0 {
 		t.Fatalf("search boarding code=%d stderr=%s stdout=%s", code, errOut, out)

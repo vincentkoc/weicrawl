@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/openclaw/crawlkit/control"
 	"github.com/openclaw/crawlkit/output"
@@ -419,6 +420,7 @@ func (e env) runSearch(args []string) error {
 	chat := fs.String("chat", "", "chat id")
 	sender := fs.String("from", "", "sender id")
 	kind := fs.String("kind", "", "message type")
+	since := fs.String("since", "", "lower bound timestamp, date, or duration like 30d")
 	limit := fs.Int("limit", 50, "limit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -432,11 +434,15 @@ func (e env) runSearch(args []string) error {
 		return err
 	}
 	defer arc.Close()
-	hits, err := arc.SearchMessages(e.ctx, query, *chat, *sender, *kind, *limit)
+	sinceValue, err := parseSince(*since)
+	if err != nil {
+		return output.UsageError{Err: err}
+	}
+	hits, err := arc.SearchMessages(e.ctx, query, *chat, *sender, *kind, sinceValue, *limit)
 	if err != nil {
 		return err
 	}
-	return e.write("search", map[string]any{"query": query, "hits": hits})
+	return e.write("search", map[string]any{"query": query, "since": sinceValue, "hits": hits})
 }
 
 func (e env) runSQL(args []string) error {
@@ -751,4 +757,29 @@ func safeMarkdownName(value string) string {
 		value = value[:80]
 	}
 	return value
+}
+
+func parseSince(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t.UTC().Format(time.RFC3339), nil
+	}
+	if t, err := time.Parse("2006-01-02", value); err == nil {
+		return t.UTC().Format(time.RFC3339), nil
+	}
+	if strings.HasSuffix(value, "d") {
+		days, err := strconv.ParseInt(strings.TrimSuffix(value, "d"), 10, 64)
+		if err != nil || days < 0 {
+			return "", fmt.Errorf("invalid --since value %q", value)
+		}
+		return time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339), nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration < 0 {
+		return "", fmt.Errorf("invalid --since value %q", value)
+	}
+	return time.Now().UTC().Add(-duration).Format(time.RFC3339), nil
 }

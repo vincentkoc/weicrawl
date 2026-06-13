@@ -380,7 +380,7 @@ func (a *Archive) InsertRawRecord(ctx context.Context, profileID, sourceName, so
 	return err
 }
 
-func (a *Archive) SearchMessages(ctx context.Context, query, chat, sender, kind string, limit int) ([]SearchHit, error) {
+func (a *Archive) SearchMessages(ctx context.Context, query, chat, sender, kind, since string, limit int) ([]SearchHit, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
@@ -398,13 +398,17 @@ func (a *Archive) SearchMessages(ctx context.Context, query, chat, sender, kind 
 		clauses = append(clauses, `m.message_type = ?`)
 		args = append(args, kind)
 	}
+	if strings.TrimSpace(since) != "" {
+		clauses = append(clauses, `coalesce(m.sent_at, '') >= ?`)
+		args = append(args, since)
+	}
 	args = append(args, limit)
 	rows, err := a.store.DB().QueryContext(ctx, `select m.profile_id, m.message_id, m.chat_id, coalesce(m.sender_id,''), coalesce(m.sent_at,''), m.message_type, m.text, bm25(message_fts) from message_fts join messages m on m.rowid = message_fts.rowid where `+strings.Join(clauses, " and ")+` order by bm25(message_fts) limit ?`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var hits []SearchHit
+	hits := []SearchHit{}
 	for rows.Next() {
 		var hit SearchHit
 		if err := rows.Scan(&hit.ProfileID, &hit.MessageID, &hit.ChatID, &hit.SenderID, &hit.SentAt, &hit.Type, &hit.Text, &hit.Rank); err != nil {
@@ -419,12 +423,12 @@ func (a *Archive) SearchMessages(ctx context.Context, query, chat, sender, kind 
 	if strings.TrimSpace(chat) != "" || strings.TrimSpace(sender) != "" || strings.TrimSpace(kind) != "" {
 		return hits, nil
 	}
-	articleHits, err := a.searchArticleHits(ctx, query, limit)
+	articleHits, err := a.searchArticleHits(ctx, query, since, limit)
 	if err != nil {
 		return nil, err
 	}
 	hits = append(hits, articleHits...)
-	otherHits, err := a.searchStructuredTextHits(ctx, query, limit)
+	otherHits, err := a.searchStructuredTextHits(ctx, query, since, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -435,13 +439,20 @@ func (a *Archive) SearchMessages(ctx context.Context, query, chat, sender, kind 
 	return hits, nil
 }
 
-func (a *Archive) searchArticleHits(ctx context.Context, query string, limit int) ([]SearchHit, error) {
-	rows, err := a.store.DB().QueryContext(ctx, `select a.profile_id, a.article_id, coalesce(a.account_id,''), coalesce(a.published_at,''), trim(a.title || ' ' || a.summary), bm25(article_fts) from article_fts join biz_articles a on a.rowid = article_fts.rowid where article_fts match ? order by bm25(article_fts) limit ?`, query, limit)
+func (a *Archive) searchArticleHits(ctx context.Context, query, since string, limit int) ([]SearchHit, error) {
+	args := []any{query}
+	clauses := []string{`article_fts match ?`}
+	if strings.TrimSpace(since) != "" {
+		clauses = append(clauses, `coalesce(a.published_at, '') >= ?`)
+		args = append(args, since)
+	}
+	args = append(args, limit)
+	rows, err := a.store.DB().QueryContext(ctx, `select a.profile_id, a.article_id, coalesce(a.account_id,''), coalesce(a.published_at,''), trim(a.title || ' ' || a.summary), bm25(article_fts) from article_fts join biz_articles a on a.rowid = article_fts.rowid where `+strings.Join(clauses, " and ")+` order by bm25(article_fts) limit ?`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var hits []SearchHit
+	hits := []SearchHit{}
 	for rows.Next() {
 		var hit SearchHit
 		if err := rows.Scan(&hit.ProfileID, &hit.ArticleID, &hit.SenderID, &hit.SentAt, &hit.Text, &hit.Rank); err != nil {
@@ -454,19 +465,23 @@ func (a *Archive) searchArticleHits(ctx context.Context, query string, limit int
 	return hits, rows.Err()
 }
 
-func (a *Archive) searchStructuredTextHits(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+func (a *Archive) searchStructuredTextHits(ctx context.Context, query, since string, limit int) ([]SearchHit, error) {
 	pattern := "%" + query + "%"
-	rows, err := a.store.DB().QueryContext(ctx, `select 'message_part', profile_id, message_id, kind, coalesce(text,'') || ' ' || coalesce(url,''), '' from message_parts where text like ? or coalesce(url,'') like ?
+	since = strings.TrimSpace(since)
+	if since == "" {
+		since = "0000"
+	}
+	rows, err := a.store.DB().QueryContext(ctx, `select 'message_part', p.profile_id, p.message_id, p.kind, coalesce(p.text,'') || ' ' || coalesce(p.url,''), coalesce(m.sent_at,'') from message_parts p left join messages m on m.profile_id = p.profile_id and m.message_id = p.message_id where (p.text like ? or coalesce(p.url,'') like ?) and coalesce(m.sent_at,'9999') >= ?
 union all
-select 'favorite', profile_id, favorite_id, kind, coalesce(title,'') || ' ' || text, coalesce(updated_at,'') from favorites where coalesce(title,'') like ? or text like ?
+select 'favorite', profile_id, favorite_id, kind, coalesce(title,'') || ' ' || text, coalesce(updated_at,'') from favorites where (coalesce(title,'') like ? or text like ?) and coalesce(updated_at,'9999') >= ?
 union all
-select 'moment', profile_id, moment_id, 'moment', text, coalesce(created_at,'') from moments where text like ?
-limit ?`, pattern, pattern, pattern, pattern, pattern, limit)
+select 'moment', profile_id, moment_id, 'moment', text, coalesce(created_at,'') from moments where text like ? and coalesce(created_at,'9999') >= ?
+limit ?`, pattern, pattern, since, pattern, pattern, since, pattern, since, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var hits []SearchHit
+	hits := []SearchHit{}
 	for rows.Next() {
 		var entity, id string
 		var hit SearchHit
