@@ -222,5 +222,21 @@ metadata under `key_info/`, and prints the copied `snapshot_path`. If
 `WEICRAWL_LIVE_KEYS` is already set, it chains into `e2e-local.sh` with that
 copied snapshot.
 
+Release readiness is stricter. It requires a clean worktree, `vincentkoc/weicrawl`
+as `origin`, a semver tag, tap updater wiring, the local e2e gate, the live
+copied-snapshot unlock/import proof, and a GoReleaser snapshot release:
+
+```bash
+WEICRAWL_RELEASE_TAG=v0.1.0 \
+WEICRAWL_LIVE_KEYS=./wechat_keys.json \
+./scripts/release-check.sh
+```
+
+For a non-release dry run that still proves local build/release packaging, use:
+
+```bash
+WEICRAWL_RELEASE_TAG=v0.1.0 ./scripts/release-check.sh --allow-missing-live
+```
+
 Tests use temp homes and synthetic SQLite fixtures only. They must not read or
 mutate the operator's live WeChat container.

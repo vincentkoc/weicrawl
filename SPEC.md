@@ -832,6 +832,10 @@ Local/dev phase:
 - Homebrew formula updates dispatch to `vincentkoc/tap` by default
 - set `HOMEBREW_TAP_REPO=openclaw/homebrew-tap` during the OpenClaw namespace
   move
+- `scripts/release-check.sh` is the release readiness gate; it requires a clean
+  tree, `origin=vincentkoc/weicrawl`, a semver tag, tap updater wiring, local
+  e2e, live copied-snapshot unlock/import proof unless explicitly dry-run
+  skipped, and a GoReleaser snapshot release
 
 OpenClaw release phase:
 
