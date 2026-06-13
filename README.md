@@ -48,6 +48,7 @@ go run ./cmd/weicrawl --json doctor
 go run ./cmd/weicrawl --json sync --source desktop-macos --keep-source-snapshot
 go run ./cmd/weicrawl --json status
 go run ./cmd/weicrawl --json search --since 30d "invoice"
+go run ./cmd/weicrawl --json tui --scope all
 ```
 
 The default desktop sync copies local DBs first. If they are encrypted, the sync

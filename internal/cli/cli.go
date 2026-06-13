@@ -887,6 +887,9 @@ func filterExportQueries(queries []exportQuery, entities ...string) []exportQuer
 
 func (e env) runTUI(args []string) error {
 	fs := newFlagSet("tui")
+	scope := fs.String("scope", "all", "messages, articles, favorites, media, moments, or all")
+	layoutFlag := fs.String("layout", "auto", "auto, chat, document, or list")
+	limit := fs.Int("limit", 500, "row limit")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -895,16 +898,84 @@ func (e env) runTUI(args []string) error {
 		return err
 	}
 	defer arc.Close()
-	result, err := arc.Query(e.ctx, `select message_id, chat_id, coalesce(sender_id,''), message_type, coalesce(sent_at,''), text from messages order by coalesce(sent_at,''), message_id limit 500`)
+	rows, err := e.tuiRows(arc, *scope, *limit)
 	if err != nil {
 		return err
 	}
+	layout, err := parseTUILayout(*layoutFlag)
+	if err != nil {
+		return output.UsageError{Err: err}
+	}
+	return cktui.Browse(e.ctx, cktui.BrowseOptions{AppName: "weicrawl", Title: "weicrawl archive", Rows: rows, JSON: e.format == output.JSON, Layout: layout, SourceKind: cktui.SourceLocal, SourceLocation: arc.Path(), Stdout: e.out})
+}
+
+func (e env) tuiRows(arc *archive.Archive, scope string, limit int) ([]cktui.Row, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 500
+	}
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "all"
+	}
 	var rows []cktui.Row
+	add := func(more []cktui.Row) {
+		rows = append(rows, more...)
+		if len(rows) > limit {
+			rows = rows[:limit]
+		}
+	}
+	switch scope {
+	case "all":
+		messageRows, err := e.tuiMessageRows(arc, limit)
+		if err != nil {
+			return nil, err
+		}
+		add(messageRows)
+		for _, loader := range []func(*archive.Archive, int) ([]cktui.Row, error){
+			e.tuiArticleRows,
+			e.tuiFavoriteRows,
+			e.tuiMediaRows,
+			e.tuiMomentRows,
+		} {
+			if len(rows) >= limit {
+				break
+			}
+			more, err := loader(arc, limit-len(rows))
+			if err != nil {
+				return nil, err
+			}
+			add(more)
+		}
+	case "messages":
+		return e.tuiMessageRows(arc, limit)
+	case "articles":
+		return e.tuiArticleRows(arc, limit)
+	case "favorites":
+		return e.tuiFavoriteRows(arc, limit)
+	case "media":
+		return e.tuiMediaRows(arc, limit)
+	case "moments":
+		return e.tuiMomentRows(arc, limit)
+	default:
+		return nil, output.UsageError{Err: fmt.Errorf("unsupported tui scope %q", scope)}
+	}
+	if rows == nil {
+		rows = []cktui.Row{}
+	}
+	return rows, nil
+}
+
+func (e env) tuiMessageRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
+	result, err := arc.Query(e.ctx, `select message_id, chat_id, coalesce(sender_id,''), message_type, coalesce(sent_at,''), text from messages order by coalesce(sent_at,''), message_id limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]cktui.Row, 0, len(result.Values))
 	for _, value := range result.Values {
 		id := fmt.Sprint(value["message_id"])
 		rows = append(rows, cktui.Row{
 			Source:    cktui.SourceLocal,
-			Kind:      fmt.Sprint(value["message_type"]),
+			Kind:      "message:" + fmt.Sprint(value["message_type"]),
 			ID:        id,
 			ParentID:  fmt.Sprint(value["chat_id"]),
 			Container: fmt.Sprint(value["chat_id"]),
@@ -914,7 +985,121 @@ func (e env) runTUI(args []string) error {
 			CreatedAt: fmt.Sprint(value["sent_at"]),
 		})
 	}
-	return cktui.Browse(e.ctx, cktui.BrowseOptions{AppName: "weicrawl", Title: "weicrawl archive", Rows: rows, JSON: e.format == output.JSON, Layout: cktui.LayoutChat, SourceKind: cktui.SourceLocal, SourceLocation: arc.Path(), Stdout: e.out})
+	return rows, nil
+}
+
+func (e env) tuiArticleRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
+	result, err := arc.Query(e.ctx, `select article_id, coalesce(account_id,''), title, coalesce(summary,''), coalesce(url,''), coalesce(published_at,'') from biz_articles order by coalesce(published_at,''), article_id limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]cktui.Row, 0, len(result.Values))
+	for _, value := range result.Values {
+		rows = append(rows, cktui.Row{
+			Source:    cktui.SourceLocal,
+			Kind:      "article",
+			ID:        fmt.Sprint(value["article_id"]),
+			ParentID:  fmt.Sprint(value["account_id"]),
+			Container: firstDisplay(value["account_id"], "official-account"),
+			Title:     firstDisplay(value["title"], value["article_id"]),
+			Text:      fmt.Sprint(value["summary"]),
+			URL:       fmt.Sprint(value["url"]),
+			CreatedAt: fmt.Sprint(value["published_at"]),
+		})
+	}
+	return rows, nil
+}
+
+func (e env) tuiFavoriteRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
+	result, err := arc.Query(e.ctx, `select favorite_id, kind, coalesce(title,''), text, coalesce(source_ref,''), coalesce(updated_at,'') from favorites order by updated_at, favorite_id limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]cktui.Row, 0, len(result.Values))
+	for _, value := range result.Values {
+		rows = append(rows, cktui.Row{
+			Source:    cktui.SourceLocal,
+			Kind:      "favorite:" + fmt.Sprint(value["kind"]),
+			ID:        fmt.Sprint(value["favorite_id"]),
+			ParentID:  fmt.Sprint(value["source_ref"]),
+			Container: "favorites",
+			Title:     firstDisplay(value["title"], value["favorite_id"]),
+			Text:      fmt.Sprint(value["text"]),
+			UpdatedAt: fmt.Sprint(value["updated_at"]),
+		})
+	}
+	return rows, nil
+}
+
+func (e env) tuiMediaRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
+	result, err := arc.Query(e.ctx, `select media_id, kind, coalesce(source_path,''), coalesce(archive_path,''), coalesce(mime_type,''), coalesce(byte_size,0), coalesce(updated_at,'') from media_items order by updated_at, media_id limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]cktui.Row, 0, len(result.Values))
+	for _, value := range result.Values {
+		path := firstDisplay(value["archive_path"], value["source_path"])
+		rows = append(rows, cktui.Row{
+			Source:    cktui.SourceLocal,
+			Kind:      "media:" + fmt.Sprint(value["kind"]),
+			ID:        fmt.Sprint(value["media_id"]),
+			Container: "media",
+			Title:     firstDisplay(filepath.Base(path), value["media_id"]),
+			Text:      path,
+			UpdatedAt: fmt.Sprint(value["updated_at"]),
+			Fields: map[string]string{
+				"mime_type": fmt.Sprint(value["mime_type"]),
+				"byte_size": fmt.Sprint(value["byte_size"]),
+			},
+		})
+	}
+	return rows, nil
+}
+
+func (e env) tuiMomentRows(arc *archive.Archive, limit int) ([]cktui.Row, error) {
+	result, err := arc.Query(e.ctx, `select moment_id, coalesce(author_id,''), text, coalesce(created_at,'') from moments order by created_at, moment_id limit ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]cktui.Row, 0, len(result.Values))
+	for _, value := range result.Values {
+		rows = append(rows, cktui.Row{
+			Source:    cktui.SourceLocal,
+			Kind:      "moment",
+			ID:        fmt.Sprint(value["moment_id"]),
+			Container: "moments",
+			Author:    fmt.Sprint(value["author_id"]),
+			Title:     firstDisplay(value["moment_id"], "moment"),
+			Text:      fmt.Sprint(value["text"]),
+			CreatedAt: fmt.Sprint(value["created_at"]),
+		})
+	}
+	return rows, nil
+}
+
+func parseTUILayout(value string) (cktui.LayoutPreset, error) {
+	switch strings.TrimSpace(value) {
+	case "", "auto":
+		return cktui.LayoutAuto, nil
+	case "chat":
+		return cktui.LayoutChat, nil
+	case "document":
+		return cktui.LayoutDocument, nil
+	case "list":
+		return cktui.LayoutList, nil
+	default:
+		return cktui.LayoutAuto, fmt.Errorf("unsupported tui layout %q", value)
+	}
+}
+
+func firstDisplay(values ...any) string {
+	for _, value := range values {
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text != "" && text != "<nil>" {
+			return text
+		}
+	}
+	return ""
 }
 
 func (e env) runCompletion(args []string) error {

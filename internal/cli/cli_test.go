@@ -152,6 +152,16 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if hits := search["hits"].([]any); len(hits) < 2 {
 		t.Fatalf("boarding hits = %#v", hits)
 	}
+	code, out, errOut = runForTest("--json", "tui", "--scope", "all", "--limit", "20")
+	if code != 0 {
+		t.Fatalf("tui json code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	tuiKinds := readTUIKindCounts(t, out.Bytes())
+	for prefix, want := range map[string]int{"message:": 2, "favorite:": 1, "media:": 1, "moment": 1} {
+		if tuiKinds[prefix] != want {
+			t.Fatalf("tui kind %s = %d, counts=%#v", prefix, tuiKinds[prefix], tuiKinds)
+		}
+	}
 
 	markdownDir := filepath.Join(root, "markdown")
 	code, out, errOut = runForTest("--json", "export", "--format", "markdown", "--out", markdownDir)
@@ -528,6 +538,29 @@ func doctorCheck(t *testing.T, doctor map[string]any, id string) map[string]any 
 	}
 	t.Fatalf("doctor check %q missing: %#v", id, checks)
 	return nil
+}
+
+func readTUIKindCounts(t *testing.T, data []byte) map[string]int {
+	t.Helper()
+	var rows []map[string]any
+	if err := json.Unmarshal(data, &rows); err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, row := range rows {
+		kind := fmt.Sprint(row["kind"])
+		switch {
+		case strings.HasPrefix(kind, "message:"):
+			counts["message:"]++
+		case strings.HasPrefix(kind, "favorite:"):
+			counts["favorite:"]++
+		case strings.HasPrefix(kind, "media:"):
+			counts["media:"]++
+		default:
+			counts[kind]++
+		}
+	}
+	return counts
 }
 
 func createNativeContactDB(t *testing.T, path string) {
