@@ -2,15 +2,19 @@ package unlock
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	_ "modernc.org/sqlite"
 )
 
 var hexKeyRE = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
@@ -74,7 +78,20 @@ type KeyManifestTemplate struct {
 	KeyInfo      []string          `json:"key_info,omitempty"`
 }
 
+type KeyInfoMetadata struct {
+	DBCount              int      `json:"db_count"`
+	ReadableDBCount      int      `json:"readable_db_count"`
+	LoginKeyInfoTables   int      `json:"login_key_info_tables,omitempty"`
+	EntryCount           int      `json:"entry_count,omitempty"`
+	HasKeyInfoDataColumn bool     `json:"has_key_info_data_column,omitempty"`
+	PlainManifestKeys    bool     `json:"plain_manifest_keys"`
+	RequiresExternalKeys bool     `json:"requires_external_keys"`
+	Errors               []string `json:"errors,omitempty"`
+	Note                 string   `json:"note"`
+}
+
 const keyManifestPlaceholder = "REPLACE_WITH_64_HEX_SQLCIPHER_KEY"
+const keyInfoMetadataNote = "key_info.db is metadata, not a filled wechat_keys.json manifest; use a reviewed extractor to supply real 64-hex SQLCipher keys"
 
 func BuildKeyScanPlan(allowProcessInspect, execute bool, scriptPath, outputPath string) (KeyScanPlan, error) {
 	plan := KeyScanPlan{
@@ -179,6 +196,75 @@ func WriteKeyManifestTemplate(snapshotDir, outputPath string) (KeyManifestTempla
 		return template, fmt.Errorf("write key manifest template: %w", err)
 	}
 	return template, nil
+}
+
+func InspectKeyInfoMetadata(ctx context.Context, paths []string) KeyInfoMetadata {
+	out := KeyInfoMetadata{
+		DBCount:              len(paths),
+		PlainManifestKeys:    false,
+		RequiresExternalKeys: true,
+		Note:                 keyInfoMetadataNote,
+	}
+	for i, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		db, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
+		if err != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("db%d: %v", i+1, err))
+			continue
+		}
+		func() {
+			defer db.Close()
+			var exists int
+			if err := db.QueryRowContext(ctx, `select count(*) from sqlite_master where type = 'table' and name = 'LoginKeyInfoTable'`).Scan(&exists); err != nil {
+				out.Errors = append(out.Errors, fmt.Sprintf("db%d: %v", i+1, err))
+				return
+			}
+			out.ReadableDBCount++
+			if exists == 0 {
+				return
+			}
+			out.LoginKeyInfoTables++
+			if hasColumn, err := tableHasColumn(ctx, db, "LoginKeyInfoTable", "key_info_data"); err != nil {
+				out.Errors = append(out.Errors, fmt.Sprintf("db%d: %v", i+1, err))
+			} else if hasColumn {
+				out.HasKeyInfoDataColumn = true
+			}
+			var count int
+			if err := db.QueryRowContext(ctx, `select count(*) from LoginKeyInfoTable`).Scan(&count); err != nil {
+				out.Errors = append(out.Errors, fmt.Sprintf("db%d: %v", i+1, err))
+				return
+			}
+			out.EntryCount += count
+		}()
+	}
+	return out
+}
+
+func sqliteReadOnlyDSN(path string) string {
+	return (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}).String()
+}
+
+func tableHasColumn(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`pragma table_info(%s)`, table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func keyScanCommand(scriptPath string) []string {

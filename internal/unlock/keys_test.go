@@ -162,6 +162,44 @@ func TestWriteKeyManifestTemplate(t *testing.T) {
 	}
 }
 
+func TestInspectKeyInfoMetadataCountsRowsWithoutReadingKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "key_info.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`create table LoginKeyInfoTable (
+		user_name_md5 text,
+		key_md5 text,
+		key_info_md5 text,
+		key_info_data blob
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into LoginKeyInfoTable values
+		('u1', 'k1', 'i1', x'0102'),
+		('u2', 'k2', 'i2', x'0304')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	metadata := InspectKeyInfoMetadata(context.Background(), []string{path})
+	if metadata.DBCount != 1 || metadata.ReadableDBCount != 1 || metadata.LoginKeyInfoTables != 1 {
+		t.Fatalf("metadata counts = %#v", metadata)
+	}
+	if metadata.EntryCount != 2 || !metadata.HasKeyInfoDataColumn {
+		t.Fatalf("metadata table details = %#v", metadata)
+	}
+	if metadata.PlainManifestKeys || !metadata.RequiresExternalKeys {
+		t.Fatalf("metadata must not claim plain keys: %#v", metadata)
+	}
+	if len(metadata.Errors) != 0 {
+		t.Fatalf("metadata errors = %#v", metadata.Errors)
+	}
+}
+
 func TestValidateSnapshotKeysReportsMissingKeys(t *testing.T) {
 	root := t.TempDir()
 	for _, rel := range []string{"message/message_0.db", "contact/contact.db"} {

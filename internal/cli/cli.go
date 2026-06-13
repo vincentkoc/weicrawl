@@ -334,6 +334,14 @@ func configuredUnlockMethods(cfg config.UnlockConfig) []string {
 	return methods
 }
 
+func keyInfoPaths(files []desktopmac.DBFile) []string {
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.Path)
+	}
+	return paths
+}
+
 func (e env) runStatus() error {
 	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
@@ -388,6 +396,7 @@ func (e env) runStatus() error {
 		"native_process_inspect": false,
 		"native_keychain":        false,
 		"key_info_db_count":      disc.KeyInfoDBCount,
+		"key_info_metadata":      unlock.InspectKeyInfoMetadata(e.ctx, keyInfoPaths(disc.KeyInfoDatabases)),
 	}
 	return e.write("status", map[string]any{
 		"control":   ckStatus,
@@ -725,6 +734,7 @@ func (e env) runUnlock(args []string) error {
 		payload["sqlcipher_available"] = sqlcipherErr == nil
 		payload["sqlcipher_path"] = resolvedSQLCipher
 		payload["error"] = errString(sqlcipherErr)
+		payload["key_info_metadata"] = unlock.InspectKeyInfoMetadata(e.ctx, keyInfoPaths(disc.KeyInfoDatabases))
 	case "desktop":
 		payload["explain"] = *explain
 		payload["once"] = *once

@@ -221,6 +221,10 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	if !unlockStatus["key_manifest_supported"].(bool) || unlockStatus["native_process_inspect"].(bool) || unlockStatus["native_keychain"].(bool) {
 		t.Fatalf("status unlock = %#v", unlockStatus)
 	}
+	keyInfoMetadata := unlockStatus["key_info_metadata"].(map[string]any)
+	if int(keyInfoMetadata["db_count"].(float64)) != 1 || !keyInfoMetadata["requires_external_keys"].(bool) {
+		t.Fatalf("status key info metadata = %#v", keyInfoMetadata)
+	}
 	if warnings := status["warnings"].([]any); len(warnings) != 0 {
 		t.Fatalf("status warnings = %#v", warnings)
 	}
@@ -540,6 +544,10 @@ func TestUnlockStatusReportsManifestPath(t *testing.T) {
 	}
 	if _, ok := payload["available_methods"].([]any); !ok {
 		t.Fatalf("unlock status missing methods list: %#v", payload)
+	}
+	keyInfoMetadata := payload["key_info_metadata"].(map[string]any)
+	if keyInfoMetadata["plain_manifest_keys"].(bool) || !keyInfoMetadata["requires_external_keys"].(bool) {
+		t.Fatalf("unlock status key info metadata = %#v", keyInfoMetadata)
 	}
 }
 
