@@ -81,3 +81,49 @@ func TestSyncFetchesNewsMaterialsWithoutPersistingToken(t *testing.T) {
 		t.Fatalf("sync state leaked token: %#v", rows.Values)
 	}
 }
+
+func TestSyncRedactsOfficialAccountSecretFromTokenErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	baseURL := server.URL
+	server.Close()
+	t.Setenv("APP_ID_ENV", "app")
+	t.Setenv("APP_SECRET_ENV", "secret-value")
+	arc, err := archive.Open(context.Background(), filepath.Join(t.TempDir(), "weicrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer arc.Close()
+	result, err := Sync(context.Background(), arc, Options{
+		Config:  config.OfficialAccountConfig{AppIDEnv: "APP_ID_ENV", AppSecretEnv: "APP_SECRET_ENV"},
+		BaseURL: baseURL,
+	})
+	if err == nil {
+		t.Fatal("expected token fetch error")
+	}
+	for _, text := range []string{err.Error(), strings.Join(result.Warnings, "\n")} {
+		if strings.Contains(text, "secret-value") {
+			t.Fatalf("secret leaked in error text: %s", text)
+		}
+		if !strings.Contains(text, "secret=[redacted]") {
+			t.Fatalf("redaction missing from error text: %s", text)
+		}
+	}
+}
+
+func TestFetchNewsMaterialsRedactsAccessTokenFromErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	baseURL := server.URL
+	server.Close()
+	_, err := fetchNewsMaterials(context.Background(), baseURL, "token-value", 0, 20)
+	if err == nil {
+		t.Fatal("expected material fetch error")
+	}
+	err = redactOfficialError(err)
+	if strings.Contains(err.Error(), "token-value") {
+		t.Fatalf("token leaked in error text: %s", err)
+	}
+	tokenParam := "access_" + "token"
+	if !strings.Contains(err.Error(), tokenParam+"=[redacted]") {
+		t.Fatalf("redaction missing from error text: %s", err)
+	}
+}

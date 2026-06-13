@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -94,6 +95,7 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 	}
 	token, err := fetchAccessToken(ctx, baseURL, appID, appSecret)
 	if err != nil {
+		err = redactOfficialError(err)
 		result.Status = "failed"
 		result.Warnings = append(result.Warnings, err.Error())
 		_ = arc.InsertSyncRun(ctx, archive.SyncRun{
@@ -114,6 +116,7 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 	}
 	materials, err := fetchNewsMaterials(ctx, baseURL, token.AccessToken, 0, 20)
 	if err != nil {
+		err = redactOfficialError(err)
 		result.Status = "partial"
 		result.Warnings = append(result.Warnings, err.Error())
 	} else {
@@ -154,6 +157,15 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 		ImportedMessages: 0,
 		Warnings:         result.Warnings,
 	})
+}
+
+var officialSecretRE = regexp.MustCompile(`(?i)(access_token|secret)=([^&\s"]+)`)
+
+func redactOfficialError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s", officialSecretRE.ReplaceAllString(err.Error(), `${1}=[redacted]`))
 }
 
 func fetchNewsMaterials(ctx context.Context, baseURL, accessToken string, offset, count int) (materialListResponse, error) {
