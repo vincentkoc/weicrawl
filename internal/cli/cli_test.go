@@ -824,6 +824,7 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	createNativeContactDB(t, filepath.Join(profileRoot, "db_storage", "contact", "contact.db"))
 	createNativeSessionDB(t, filepath.Join(profileRoot, "db_storage", "session", "session.db"))
 	createNativeMessageDB(t, filepath.Join(profileRoot, "db_storage", "message", "message_0.db"), "alice")
+	createNativeBizMessageDB(t, filepath.Join(profileRoot, "db_storage", "message", "message_biz.db"), "gh_news")
 
 	code, out, errOut := runForTest("--json", "init")
 	if code != 0 {
@@ -841,16 +842,19 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	if got := int(payload["imported_contacts"].(float64)); got != 1 {
 		t.Fatalf("imported_contacts = %d, payload=%#v", got, payload)
 	}
-	if got := int(payload["imported_messages"].(float64)); got != 3 {
+	if got := int(payload["imported_messages"].(float64)); got != 4 {
 		t.Fatalf("imported_messages = %d, payload=%#v", got, payload)
 	}
-	if got := int(payload["imported_message_parts"].(float64)); got != 2 {
+	if got := int(payload["imported_message_parts"].(float64)); got != 3 {
 		t.Fatalf("imported_message_parts = %d, payload=%#v", got, payload)
 	}
 	if got := int(payload["imported_media"].(float64)); got != 1 {
 		t.Fatalf("imported_media = %d, payload=%#v", got, payload)
 	}
-	if got := int(payload["imported_articles"].(float64)); got != 1 {
+	if got := int(payload["imported_biz_accounts"].(float64)); got != 1 {
+		t.Fatalf("imported_biz_accounts = %d, payload=%#v", got, payload)
+	}
+	if got := int(payload["imported_articles"].(float64)); got != 2 {
 		t.Fatalf("imported_articles = %d, payload=%#v", got, payload)
 	}
 	if got := int(payload["imported_favorites"].(float64)); got != 1 {
@@ -870,8 +874,19 @@ func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &articles); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(articles["values"].([]any)); got != 1 {
+	if got := len(articles["values"].([]any)); got != 2 {
 		t.Fatalf("articles values = %d, payload=%#v", got, articles)
+	}
+	code, out, errOut = runForTest("--json", "sql", "select count(*) as n from biz_accounts")
+	if code != 0 {
+		t.Fatalf("biz sql code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	var bizAccounts map[string]any
+	if err := json.Unmarshal(out.Bytes(), &bizAccounts); err != nil {
+		t.Fatal(err)
+	}
+	if got := int(bizAccounts["values"].([]any)[0].(map[string]any)["n"].(float64)); got != 1 {
+		t.Fatalf("biz account count = %d, payload=%#v", got, bizAccounts)
 	}
 	code, out, errOut = runForTest("--json", "media")
 	if code != 0 {
@@ -1203,6 +1218,27 @@ insert into "`+table+`" values(8, 49, 1781323300, 'alice', ?, '0');
 insert into "`+table+`" values(9, 3, 1781323400, 'alice', ?, '0');
 insert into FavoriteTable values('fav-native-1', 'message', 'Native favorite', 'native favorite text', 'message:8', 1781323500);
 insert into SnsTimeline values('sns-native-1', 'alice', 'native moment text', 1781323600);`, linkXML, imageXML)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createNativeBizMessageDB(t *testing.T, path, username string) {
+	t.Helper()
+	db := openFixtureDB(t, path)
+	defer db.Close()
+	table := nativeMsgTable(username)
+	_, err := db.Exec(`create table Name2Id(user_name text);
+insert into Name2Id values(?);`, username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`create table "` + table + `"(local_id integer, local_type integer, create_time integer, real_sender_id text, message_content text, source text);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkXML := `<msg><appmsg><title>Public account post</title><des>Biz summary</des><url>https://example.invalid/biz</url><appname>WeChat</appname></appmsg></msg>`
+	_, err = db.Exec(`insert into "`+table+`" values(11, 49, 1781323700, 'gh_news', ?, '0');`, linkXML)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,24 +21,25 @@ type Options struct {
 }
 
 type Result struct {
-	RunID              string   `json:"run_id"`
-	ProfileID          string   `json:"profile_id"`
-	Source             string   `json:"source"`
-	Since              string   `json:"since,omitempty"`
-	BackupRoot         string   `json:"backup_root"`
-	SourceDBCount      int      `json:"source_db_count"`
-	ImportedProfiles   int64    `json:"imported_profiles"`
-	ImportedContacts   int64    `json:"imported_contacts"`
-	ImportedChats      int64    `json:"imported_chats"`
-	ImportedMessages   int64    `json:"imported_messages"`
-	ImportedParts      int64    `json:"imported_message_parts"`
-	ImportedEvents     int64    `json:"imported_message_events"`
-	ImportedMedia      int64    `json:"imported_media"`
-	ImportedArticles   int64    `json:"imported_articles"`
-	ImportedFavorites  int64    `json:"imported_favorites"`
-	ImportedMoments    int64    `json:"imported_moments"`
-	ImportedRawRecords int64    `json:"imported_raw_records"`
-	Warnings           []string `json:"warnings,omitempty"`
+	RunID               string   `json:"run_id"`
+	ProfileID           string   `json:"profile_id"`
+	Source              string   `json:"source"`
+	Since               string   `json:"since,omitempty"`
+	BackupRoot          string   `json:"backup_root"`
+	SourceDBCount       int      `json:"source_db_count"`
+	ImportedProfiles    int64    `json:"imported_profiles"`
+	ImportedContacts    int64    `json:"imported_contacts"`
+	ImportedChats       int64    `json:"imported_chats"`
+	ImportedMessages    int64    `json:"imported_messages"`
+	ImportedParts       int64    `json:"imported_message_parts"`
+	ImportedEvents      int64    `json:"imported_message_events"`
+	ImportedMedia       int64    `json:"imported_media"`
+	ImportedBizAccounts int64    `json:"imported_biz_accounts"`
+	ImportedArticles    int64    `json:"imported_articles"`
+	ImportedFavorites   int64    `json:"imported_favorites"`
+	ImportedMoments     int64    `json:"imported_moments"`
+	ImportedRawRecords  int64    `json:"imported_raw_records"`
+	Warnings            []string `json:"warnings,omitempty"`
 }
 
 func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, error) {
@@ -76,6 +77,7 @@ func Sync(ctx context.Context, arc *archive.Archive, opts Options) (Result, erro
 	result.ImportedParts = importResult.MessageParts
 	result.ImportedEvents = importResult.MessageEvents
 	result.ImportedMedia = importResult.Media
+	result.ImportedBizAccounts = importResult.BizAccounts
 	result.ImportedArticles = importResult.Articles
 	result.ImportedFavorites = importResult.Favorites
 	result.ImportedMoments = importResult.Moments

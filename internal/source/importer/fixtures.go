@@ -24,6 +24,7 @@ type Result struct {
 	MessageParts  int64 `json:"message_parts"`
 	MessageEvents int64 `json:"message_events"`
 	Media         int64 `json:"media"`
+	BizAccounts   int64 `json:"biz_accounts"`
 	Articles      int64 `json:"articles"`
 	Favorites     int64 `json:"favorites"`
 	Moments       int64 `json:"moments"`
@@ -60,6 +61,7 @@ func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive
 		result.MessageParts += counts.MessageParts
 		result.MessageEvents += counts.MessageEvents
 		result.Media += counts.Media
+		result.BizAccounts += counts.BizAccounts
 		result.Articles += counts.Articles
 		result.Favorites += counts.Favorites
 		result.Moments += counts.Moments
@@ -403,6 +405,18 @@ func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, 
 			kind = "group"
 		} else if strings.HasPrefix(username, "gh_") {
 			kind = "public_account"
+		}
+		if kind == "public_account" {
+			rawJSON, _ := json.Marshal(map[string]any{"source": "Name2Id", "db": filepath.Base(file.Path)})
+			if err := arc.UpsertBizAccount(ctx, archive.BizAccount{
+				ProfileID:   profileID,
+				AccountID:   username,
+				DisplayName: username,
+				RawJSON:     string(rawJSON),
+			}); err != nil {
+				return result, err
+			}
+			result.BizAccounts++
 		}
 		if err := arc.UpsertChat(ctx, profileID, username, kind, username, "", 0, false, false, map[string]any{"source": "Name2Id", "db": filepath.Base(file.Path)}); err != nil {
 			return result, err
@@ -970,6 +984,7 @@ func (r *Result) add(other Result) {
 	r.MessageParts += other.MessageParts
 	r.MessageEvents += other.MessageEvents
 	r.Media += other.Media
+	r.BizAccounts += other.BizAccounts
 	r.Articles += other.Articles
 	r.Favorites += other.Favorites
 	r.Moments += other.Moments

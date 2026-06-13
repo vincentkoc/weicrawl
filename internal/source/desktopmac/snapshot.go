@@ -49,27 +49,28 @@ type SnapshotFile struct {
 }
 
 type SyncResult struct {
-	RunID              string   `json:"run_id"`
-	ProfileID          string   `json:"profile_id,omitempty"`
-	Source             string   `json:"source"`
-	Status             string   `json:"status"`
-	Since              string   `json:"since,omitempty"`
-	Concurrency        int      `json:"concurrency,omitempty"`
-	SnapshotPath       string   `json:"snapshot_path,omitempty"`
-	DecryptedSnapshot  string   `json:"decrypted_snapshot_path,omitempty"`
-	SourceDBCount      int      `json:"source_db_count"`
-	ImportedProfiles   int64    `json:"imported_profiles"`
-	ImportedContacts   int64    `json:"imported_contacts"`
-	ImportedChats      int64    `json:"imported_chats"`
-	ImportedMessages   int64    `json:"imported_messages"`
-	ImportedParts      int64    `json:"imported_message_parts"`
-	ImportedEvents     int64    `json:"imported_message_events"`
-	ImportedMedia      int64    `json:"imported_media"`
-	ImportedArticles   int64    `json:"imported_articles"`
-	ImportedFavorites  int64    `json:"imported_favorites"`
-	ImportedMoments    int64    `json:"imported_moments"`
-	ImportedRawRecords int64    `json:"imported_raw_records"`
-	Warnings           []string `json:"warnings,omitempty"`
+	RunID               string   `json:"run_id"`
+	ProfileID           string   `json:"profile_id,omitempty"`
+	Source              string   `json:"source"`
+	Status              string   `json:"status"`
+	Since               string   `json:"since,omitempty"`
+	Concurrency         int      `json:"concurrency,omitempty"`
+	SnapshotPath        string   `json:"snapshot_path,omitempty"`
+	DecryptedSnapshot   string   `json:"decrypted_snapshot_path,omitempty"`
+	SourceDBCount       int      `json:"source_db_count"`
+	ImportedProfiles    int64    `json:"imported_profiles"`
+	ImportedContacts    int64    `json:"imported_contacts"`
+	ImportedChats       int64    `json:"imported_chats"`
+	ImportedMessages    int64    `json:"imported_messages"`
+	ImportedParts       int64    `json:"imported_message_parts"`
+	ImportedEvents      int64    `json:"imported_message_events"`
+	ImportedMedia       int64    `json:"imported_media"`
+	ImportedBizAccounts int64    `json:"imported_biz_accounts"`
+	ImportedArticles    int64    `json:"imported_articles"`
+	ImportedFavorites   int64    `json:"imported_favorites"`
+	ImportedMoments     int64    `json:"imported_moments"`
+	ImportedRawRecords  int64    `json:"imported_raw_records"`
+	Warnings            []string `json:"warnings,omitempty"`
 }
 
 func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error) {
@@ -183,6 +184,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 	result.ImportedParts = importResult.MessageParts
 	result.ImportedEvents = importResult.MessageEvents
 	result.ImportedMedia = importResult.Media
+	result.ImportedBizAccounts = importResult.BizAccounts
 	result.ImportedArticles = importResult.Articles
 	result.ImportedFavorites = importResult.Favorites
 	result.ImportedMoments = importResult.Moments
@@ -267,6 +269,7 @@ func SyncDecryptedDirectory(ctx context.Context, arc *archive.Archive, profileID
 	result.ImportedParts = importResult.MessageParts
 	result.ImportedEvents = importResult.MessageEvents
 	result.ImportedMedia = importResult.Media
+	result.ImportedBizAccounts = importResult.BizAccounts
 	result.ImportedArticles = importResult.Articles
 	result.ImportedFavorites = importResult.Favorites
 	result.ImportedMoments = importResult.Moments

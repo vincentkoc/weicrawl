@@ -35,6 +35,7 @@ type Status struct {
 	MediaCount                int64            `json:"media_metadata_count"`
 	FavoriteCount             int64            `json:"favorite_count"`
 	MomentCount               int64            `json:"moment_count"`
+	BizAccountCount           int64            `json:"biz_account_count"`
 	PublicAccountArticleCount int64            `json:"public_account_article_count"`
 	LastSyncRun               *SyncRun         `json:"last_sync_run,omitempty"`
 	Counts                    []Count          `json:"counts"`
@@ -146,6 +147,13 @@ type Favorite struct {
 	RawJSON    string `json:"raw_json,omitempty"`
 }
 
+type BizAccount struct {
+	ProfileID   string `json:"profile_id"`
+	AccountID   string `json:"account_id"`
+	DisplayName string `json:"display_name,omitempty"`
+	RawJSON     string `json:"raw_json,omitempty"`
+}
+
 type Article struct {
 	ProfileID   string `json:"profile_id"`
 	ArticleID   string `json:"article_id"`
@@ -232,6 +240,10 @@ func (a *Archive) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return status, err
 	}
+	status.BizAccountCount, err = a.scalar(ctx, `select count(*) from biz_accounts`)
+	if err != nil {
+		return status, err
+	}
 	status.PublicAccountArticleCount, err = a.scalar(ctx, `select count(*) from biz_articles`)
 	if err != nil {
 		return status, err
@@ -261,6 +273,7 @@ func (a *Archive) Status(ctx context.Context) (Status, error) {
 		{ID: "messages", Label: "Messages", Value: status.MessageCount},
 		{ID: "media_items", Label: "Media metadata", Value: status.MediaCount},
 		{ID: "favorites", Label: "Favorites", Value: status.FavoriteCount},
+		{ID: "biz_accounts", Label: "Public accounts", Value: status.BizAccountCount},
 		{ID: "biz_articles", Label: "Public-account articles", Value: status.PublicAccountArticleCount},
 		{ID: "moments", Label: "Moments", Value: status.MomentCount},
 	}
@@ -367,6 +380,13 @@ func (a *Archive) UpsertFavorite(ctx context.Context, favorite Favorite) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := a.store.DB().ExecContext(ctx, `insert into favorites(profile_id, favorite_id, kind, title, text, source_ref, raw_json, updated_at) values(?,?,?,?,?,?,?,?) on conflict(profile_id, favorite_id) do update set kind=excluded.kind, title=excluded.title, text=excluded.text, source_ref=excluded.source_ref, raw_json=excluded.raw_json, updated_at=excluded.updated_at`,
 		favorite.ProfileID, favorite.FavoriteID, defaultString(favorite.Kind, "unknown"), nullEmpty(favorite.Title), favorite.Text, nullEmpty(favorite.SourceRef), defaultString(favorite.RawJSON, "{}"), now)
+	return err
+}
+
+func (a *Archive) UpsertBizAccount(ctx context.Context, account BizAccount) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := a.store.DB().ExecContext(ctx, `insert into biz_accounts(profile_id, account_id, display_name, raw_json, updated_at) values(?,?,?,?,?) on conflict(profile_id, account_id) do update set display_name=excluded.display_name, raw_json=excluded.raw_json, updated_at=excluded.updated_at`,
+		account.ProfileID, account.AccountID, nullEmpty(account.DisplayName), defaultString(account.RawJSON, "{}"), now)
 	return err
 }
 
