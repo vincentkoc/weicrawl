@@ -97,7 +97,8 @@ go run ./cmd/weicrawl --json sync \
 JSONL:
 
 ```bash
-go run ./cmd/weicrawl --json export --format jsonl --out exports/messages.jsonl
+go run ./cmd/weicrawl --json export --format jsonl --out exports/archive.jsonl
+go run ./cmd/weicrawl --json export --format jsonl --scope messages --out exports/messages.jsonl
 ```
 
 Markdown:

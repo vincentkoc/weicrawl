@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,6 +151,36 @@ func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(markdownDir, "chat-1.md")); err != nil {
 		t.Fatalf("markdown export missing: %v", err)
+	}
+	jsonlPath := filepath.Join(root, "archive.jsonl")
+	code, out, errOut = runForTest("--json", "export", "--format", "jsonl", "--out", jsonlPath)
+	if code != 0 {
+		t.Fatalf("export jsonl code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	counts := readJSONLEntityCounts(t, jsonlPath)
+	for entity, want := range map[string]int{
+		"profile":       1,
+		"contact":       1,
+		"chat":          1,
+		"message":       2,
+		"message_part":  1,
+		"message_event": 1,
+		"favorite":      1,
+		"media":         1,
+		"moment":        1,
+	} {
+		if counts[entity] != want {
+			t.Fatalf("jsonl %s count = %d, counts=%#v", entity, counts[entity], counts)
+		}
+	}
+	messagesOnlyPath := filepath.Join(root, "messages.jsonl")
+	code, out, errOut = runForTest("--json", "export", "--format", "jsonl", "--scope", "messages", "--out", messagesOnlyPath)
+	if code != 0 {
+		t.Fatalf("export messages jsonl code=%d stderr=%s stdout=%s", code, errOut, out)
+	}
+	counts = readJSONLEntityCounts(t, messagesOnlyPath)
+	if counts["message"] != 2 || counts["favorite"] != 0 {
+		t.Fatalf("messages scope counts=%#v", counts)
 	}
 
 	snapshotDir := filepath.Join(root, "snapshot")
@@ -419,6 +451,28 @@ func runForTest(args ...string) (int, *bytes.Buffer, *bytes.Buffer) {
 	var stdout, stderr bytes.Buffer
 	code := Main(args, &stdout, &stderr)
 	return code, &stdout, &stderr
+}
+
+func readJSONLEntityCounts(t *testing.T, path string) map[string]int {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	counts := map[string]int{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var row map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+			t.Fatal(err)
+		}
+		counts[fmt.Sprint(row["entity"])]++
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return counts
 }
 
 func createNativeContactDB(t *testing.T, path string) {

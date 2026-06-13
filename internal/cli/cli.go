@@ -520,6 +520,7 @@ func (e env) runExport(args []string) error {
 	fs := newFlagSet("export")
 	outPath := fs.String("out", "", "output file")
 	format := fs.String("format", "jsonl", "jsonl or markdown")
+	scope := fs.String("scope", "all", "messages, articles, favorites, media, moments, raw, or all")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -532,16 +533,27 @@ func (e env) runExport(args []string) error {
 	}
 	defer arc.Close()
 	if *format == "markdown" {
+		if *scope != "all" && *scope != "messages" {
+			return output.UsageError{Err: fmt.Errorf("markdown export only supports messages scope, got %q", *scope)}
+		}
 		return e.exportMarkdown(arc, config.Expand(*outPath))
 	}
 	if *format != "jsonl" {
 		return output.UsageError{Err: fmt.Errorf("unsupported export format %q", *format)}
 	}
-	result, err := arc.Query(e.ctx, `select profile_id, message_id, chat_id, sender_id, direction, message_type, sent_at, text, raw_json from messages order by sent_at, message_id`)
+	return e.exportJSONL(arc, config.Expand(*outPath), *scope)
+}
+
+type exportQuery struct {
+	Entity string
+	Query  string
+}
+
+func (e env) exportJSONL(arc *archive.Archive, path, scope string) error {
+	queries, err := exportQueries(scope)
 	if err != nil {
-		return err
+		return output.UsageError{Err: err}
 	}
-	path := config.Expand(*outPath)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -550,16 +562,28 @@ func (e env) runExport(args []string) error {
 		return err
 	}
 	enc := json.NewEncoder(file)
-	for _, row := range result.Values {
-		if err := enc.Encode(row); err != nil {
+	rowsWritten := 0
+	counts := map[string]int{}
+	for _, export := range queries {
+		result, err := arc.Query(e.ctx, export.Query)
+		if err != nil {
 			_ = file.Close()
 			return err
+		}
+		for _, row := range result.Values {
+			row["entity"] = export.Entity
+			if err := enc.Encode(row); err != nil {
+				_ = file.Close()
+				return err
+			}
+			rowsWritten++
+			counts[export.Entity]++
 		}
 	}
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return e.write("export", map[string]any{"path": path, "format": "jsonl", "rows": len(result.Values)})
+	return e.write("export", map[string]any{"path": path, "format": "jsonl", "scope": scope, "rows": rowsWritten, "counts": counts})
 }
 
 func (e env) exportMarkdown(arc *archive.Archive, dir string) error {
@@ -584,6 +608,59 @@ func (e env) exportMarkdown(arc *archive.Archive, dir string) error {
 		}
 	}
 	return e.write("export", map[string]any{"path": dir, "format": "markdown", "files": len(files)})
+}
+
+func exportQueries(scope string) ([]exportQuery, error) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "all"
+	}
+	all := []exportQuery{
+		{Entity: "profile", Query: `select profile_id, wxid, display_name, source_root, app_version, raw_json, updated_at from profiles order by profile_id`},
+		{Entity: "contact", Query: `select profile_id, contact_id, alias, display_name, remark_name, kind, avatar_ref, raw_json, updated_at from contacts order by profile_id, contact_id`},
+		{Entity: "chat", Query: `select profile_id, chat_id, kind, title, last_message_at, unread_count, muted, pinned, raw_json, updated_at from chats order by profile_id, chat_id`},
+		{Entity: "chat_member", Query: `select profile_id, chat_id, contact_id, display_name, raw_json, updated_at from chat_members order by profile_id, chat_id, contact_id`},
+		{Entity: "message", Query: `select profile_id, message_id, chat_id, sender_id, direction, message_type, sent_at, edited_at, deleted_at, text, normalized_text, source_db, source_rowid, raw_json, updated_at from messages order by profile_id, chat_id, coalesce(sent_at,''), message_id`},
+		{Entity: "message_part", Query: `select profile_id, message_id, part_index, kind, text, media_id, url, raw_json from message_parts order by profile_id, message_id, part_index`},
+		{Entity: "message_event", Query: `select event_id, profile_id, chat_id, message_id, event_type, event_at, payload_json from message_events order by profile_id, chat_id, event_at, event_id`},
+		{Entity: "media", Query: `select profile_id, media_id, kind, source_path, archive_path, mime_type, byte_size, sha256, width, height, duration_ms, raw_json, updated_at from media_items order by profile_id, media_id`},
+		{Entity: "favorite", Query: `select profile_id, favorite_id, kind, title, text, source_ref, raw_json, updated_at from favorites order by profile_id, favorite_id`},
+		{Entity: "biz_account", Query: `select profile_id, account_id, display_name, raw_json, updated_at from biz_accounts order by profile_id, account_id`},
+		{Entity: "article", Query: `select profile_id, article_id, account_id, title, url, summary, published_at, raw_json, updated_at from biz_articles order by profile_id, coalesce(published_at,''), article_id`},
+		{Entity: "moment", Query: `select profile_id, moment_id, author_id, text, created_at, raw_json, updated_at from moments order by profile_id, coalesce(created_at,''), moment_id`},
+	}
+	switch scope {
+	case "all":
+		return all, nil
+	case "messages":
+		return filterExportQueries(all, "message", "message_part", "message_event"), nil
+	case "articles":
+		return filterExportQueries(all, "biz_account", "article"), nil
+	case "favorites":
+		return filterExportQueries(all, "favorite"), nil
+	case "media":
+		return filterExportQueries(all, "media"), nil
+	case "moments":
+		return filterExportQueries(all, "moment"), nil
+	case "raw":
+		return []exportQuery{{Entity: "raw_record", Query: `select id, profile_id, source_name, source_table, source_key, record_kind, payload_json, observed_at from raw_records order by profile_id, source_name, source_table, id`}}, nil
+	default:
+		return nil, fmt.Errorf("unsupported export scope %q", scope)
+	}
+}
+
+func filterExportQueries(queries []exportQuery, entities ...string) []exportQuery {
+	wanted := map[string]bool{}
+	for _, entity := range entities {
+		wanted[entity] = true
+	}
+	var out []exportQuery
+	for _, query := range queries {
+		if wanted[query.Entity] {
+			out = append(out, query)
+		}
+	}
+	return out
 }
 
 func (e env) runTUI(args []string) error {
