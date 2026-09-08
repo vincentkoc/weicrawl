@@ -11,8 +11,9 @@
   omit recognized legacy credential-table rows from all/raw exports without
   deleting retained history or changing explicit key workflows.
 
-- Use published crawlkit v0.14.7 without a sibling checkout, with standalone CI.
-  The minimum Go version is now 1.26.6.
+- Use published crawlkit v0.15.0 without a sibling checkout, with its matching
+  SQLite/libc dependencies. Source builds require Go 1.27.0, with Go 1.27.1
+  preferred; standalone CI verifies both toolchains and builds all packages.
 - Reject overlapping decryption paths and require owned roots for automatic
   cleanup; preserve caller-owned roots with explicit retention or separate
   decryption, stage private outputs, and retain incomplete imports for recovery.
