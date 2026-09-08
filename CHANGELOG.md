@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Namespace new native messages by shard, preserve identifiable legacy IDs and
+  references, and reject ambiguous existing targets before native message writes.
+  Already overwritten observations require source reimport; no archive rekey or
+  whole-import rollback is performed.
+
 - Exclude recognized credential stores and tables before content import, and
   omit recognized legacy credential-table rows from all/raw exports without
   deleting retained history or changing explicit key workflows.

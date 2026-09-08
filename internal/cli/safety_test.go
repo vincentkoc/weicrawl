@@ -236,7 +236,7 @@ func TestSafetyPartialShardImportIsNotHealthy(t *testing.T) {
 }
 
 func TestSafetyUnlockOwnedCleanupAndIncompleteImport(t *testing.T) {
-	for _, scenario := range []string{"complete", "keep", "partial", "existing", "existing-keep", "existing-no-sync", "case-folded", "dot-parent-alias"} {
+	for _, scenario := range []string{"complete", "keep", "partial", "ambiguous", "existing", "existing-keep", "existing-no-sync", "case-folded", "dot-parent-alias"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			if scenario == "case-folded" {
@@ -282,6 +282,23 @@ func TestSafetyUnlockOwnedCleanupAndIncompleteImport(t *testing.T) {
 			}
 			out := filepath.Join(root, "decrypted")
 			dbPath := filepath.Join(root, "archive.db")
+			if scenario == "ambiguous" {
+				arc, err := archive.Open(t.Context(), dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				legacy := legacyNativeMessage("message.db", 9)
+				legacy.ProfileID = "decrypted"
+				legacy.MessageID = "unknown:" + legacy.SourceRowID
+				legacy.SourceDB = "unknown"
+				legacy.RawJSON = "{}"
+				if err := arc.UpsertMessage(t.Context(), legacy); err != nil {
+					t.Fatal(err)
+				}
+				if err := arc.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if scenario == "case-folded" {
 				out = filepath.Join(root, "Decrypted")
 				dbPath = filepath.Join(root, "decrypted", "archive.db")
@@ -341,6 +358,21 @@ func TestSafetyUnlockOwnedCleanupAndIncompleteImport(t *testing.T) {
 			if scenario == "case-folded" || scenario == "dot-parent-alias" {
 				if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
 					t.Fatalf("archive created inside cleanup root: %v", err)
+				}
+			}
+			if scenario == "ambiguous" {
+				arc, err := archive.OpenReadOnly(t.Context(), dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer arc.Close()
+				status, err := arc.Status(t.Context())
+				if err != nil || status.MessageCount != 1 || status.LastSyncRun == nil || status.LastSyncRun.Status != "partial" {
+					t.Fatalf("ambiguous import lost preflight/partial state: %#v error=%v", status, err)
+				}
+				data, err := os.ReadFile(filepath.Join(out, "message.db"))
+				if err != nil || !bytes.HasPrefix(data, []byte("SQLite format 3")) {
+					t.Fatalf("ambiguity lost decrypted recovery material: %v", err)
 				}
 			}
 		})

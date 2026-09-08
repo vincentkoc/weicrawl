@@ -61,6 +61,10 @@ func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive
 	if excludedStores > 0 {
 		warnings = append(warnings, fmt.Sprintf("%d credential stores excluded from content import", excludedStores))
 	}
+	contentFiles, err := uniqueSourceFiles(contentFiles)
+	if err != nil {
+		return result, warnings, err
+	}
 	for _, file := range contentFiles {
 		if err := ctx.Err(); err != nil {
 			return result, warnings, errors.Join(append(failures, err)...)
@@ -414,6 +418,9 @@ func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, 
 	if err := rows.Err(); err != nil {
 		return result, err
 	}
+	if err := preflightNativeMessageIDs(ctx, arc, db, profileID, file, usernames, tables, opts); err != nil {
+		return result, err
+	}
 	for _, username := range usernames {
 		table := messageTableName(username)
 		if !tables[table] {
@@ -466,18 +473,25 @@ func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, 
 			if sender == "" {
 				sender = username
 			}
+			messageID, err := resolveNativeMessageID(ctx, arc, profileID,
+				nativeMessageIdentity{file.Role, filepath.Base(file.Path), table, localID})
+			if err != nil {
+				_ = msgRows.Close()
+				return result, err
+			}
 			raw := map[string]any{
-				"source_db":    filepath.Base(file.Path),
-				"source_role":  file.Role,
-				"source_table": table,
-				"local_id":     localID,
-				"local_type":   localType,
-				"source":       sourceValue,
+				"native_identity_version": 2,
+				"source_db":               filepath.Base(file.Path),
+				"source_role":             file.Role,
+				"source_table":            table,
+				"local_id":                localID,
+				"local_type":              localType,
+				"source":                  sourceValue,
 			}
 			rawJSON, _ := json.Marshal(raw)
 			msg := archive.Message{
 				ProfileID:      profileID,
-				MessageID:      file.Role + ":" + table + ":" + strconv.FormatInt(localID, 10),
+				MessageID:      messageID,
 				ChatID:         username,
 				SenderID:       sender,
 				Direction:      directionFromSource(sourceValue),
