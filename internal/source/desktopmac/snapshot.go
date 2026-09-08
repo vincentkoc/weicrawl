@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -75,15 +76,38 @@ type SyncResult struct {
 	Warnings            []string `json:"warnings,omitempty"`
 }
 
-func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error) {
+func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (snap Snapshot, resultErr error) {
+	if err := ctx.Err(); err != nil {
+		return Snapshot{}, err
+	}
 	if strings.TrimSpace(opts.CacheDir) == "" {
 		return Snapshot{}, fmt.Errorf("cache dir is required")
 	}
 	if strings.TrimSpace(opts.Profile.Root) == "" {
 		return Snapshot{}, fmt.Errorf("profile root is required")
 	}
-	runID := "sync-" + time.Now().UTC().Format("20060102T150405.000000000Z")
-	root := filepath.Join(opts.CacheDir, "snapshots", runID, opts.Profile.ProfileID)
+	if opts.Profile.ProfileID == "." || !filepath.IsLocal(opts.Profile.ProfileID) || filepath.Base(opts.Profile.ProfileID) != opts.Profile.ProfileID {
+		return Snapshot{}, fmt.Errorf("profile id must be a directory name")
+	}
+	parent := filepath.Join(opts.CacheDir, "snapshots")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return Snapshot{}, err
+	}
+	owned, err := os.MkdirTemp(parent, "sync-*")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer func() {
+		if resultErr != nil && !opts.Keep {
+			if err := os.RemoveAll(owned); err != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("cleanup source snapshot: %w", err))
+			} else {
+				snap.Root = ""
+			}
+		}
+	}()
+	runID := filepath.Base(owned)
+	root := filepath.Join(owned, opts.Profile.ProfileID)
 	dbDir := filepath.Join(root, "db_storage")
 	if err := os.MkdirAll(dbDir, 0o700); err != nil {
 		return Snapshot{}, fmt.Errorf("create snapshot dir: %w", err)
@@ -92,7 +116,7 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	snap := Snapshot{
+	snap = Snapshot{
 		RunID:              runID,
 		Root:               root,
 		ProfileID:          opts.Profile.ProfileID,
@@ -106,10 +130,16 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 			rel = filepath.Base(db.Path)
 		}
 		dst := filepath.Join(dbDir, rel)
-		if err := copyFile(dst, db.Path); err != nil {
+		if !filepath.IsLocal(rel) {
+			return snap, fmt.Errorf("database escapes selected source root")
+		}
+		if err := copyFile(ctx, dst, db.Path); err != nil {
 			return snap, fmt.Errorf("copy db %s: %w", db.Path, err)
 		}
-		hash, _ := fileSHA256(dst)
+		hash, err := fileSHA256(ctx, dst)
+		if err != nil {
+			return snap, err
+		}
 		snap.SourceFingerprints[rel] = hash
 		info, _ := os.Stat(dst)
 		size := int64(0)
@@ -122,7 +152,10 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 			if err != nil {
 				sideRel = rel + strings.TrimPrefix(sidecar, db.Path)
 			}
-			if err := copyFile(filepath.Join(dbDir, sideRel), sidecar); err != nil {
+			if !filepath.IsLocal(sideRel) {
+				return snap, fmt.Errorf("sidecar escapes selected source root")
+			}
+			if err := copyFile(ctx, filepath.Join(dbDir, sideRel), sidecar); err != nil {
 				return snap, fmt.Errorf("copy sidecar %s: %w", sidecar, err)
 			}
 		}
@@ -134,10 +167,13 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 		}
 		rel := filepath.Join(loginID, filepath.Base(db.Path))
 		dst := filepath.Join(root, "key_info", rel)
-		if err := copyFile(dst, db.Path); err != nil {
+		if err := copyFile(ctx, dst, db.Path); err != nil {
 			return snap, fmt.Errorf("copy key info db %s: %w", db.Path, err)
 		}
-		hash, _ := fileSHA256(dst)
+		hash, err := fileSHA256(ctx, dst)
+		if err != nil {
+			return snap, err
+		}
 		snap.SourceFingerprints[filepath.Join("key_info", rel)] = hash
 		info, _ := os.Stat(dst)
 		size := int64(0)
@@ -147,7 +183,7 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 		snap.KeyInfoFiles = append(snap.KeyInfoFiles, SnapshotFile{Source: db.Path, Path: dst, Role: db.Role, Size: size, SHA256: hash})
 		for _, sidecar := range db.Sidecars {
 			sideRel := rel + strings.TrimPrefix(sidecar, db.Path)
-			if err := copyFile(filepath.Join(root, "key_info", sideRel), sidecar); err != nil {
+			if err := copyFile(ctx, filepath.Join(root, "key_info", sideRel), sidecar); err != nil {
 				return snap, fmt.Errorf("copy key info sidecar %s: %w", sidecar, err)
 			}
 		}
@@ -160,10 +196,13 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 				rel = filepath.Base(dir)
 			}
 			dst := filepath.Join(mediaRoot, rel)
+			if !filepath.IsLocal(rel) {
+				return snap, fmt.Errorf("media directory escapes selected source root")
+			}
 			if opts.MediaMode == "copy" {
-				err = copyDir(dst, dir, concurrency)
+				err = copyDir(ctx, dst, dir, concurrency)
 			} else {
-				err = copyDirMetadataOnly(dst, dir, concurrency)
+				err = copyDirMetadataOnly(ctx, dst, dir, concurrency)
 			}
 			if err != nil {
 				return snap, err
@@ -171,14 +210,33 @@ func CreateSnapshot(ctx context.Context, opts SnapshotOptions) (Snapshot, error)
 			snap.MediaDirs = append(snap.MediaDirs, dst)
 		}
 	}
-	_ = ctx
-	return snap, nil
+	return snap, ctx.Err()
 }
 
 func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts SnapshotOptions) (SyncResult, error) {
+	return syncDesktopSnapshot(ctx, arc, opts, os.RemoveAll)
+}
+
+func syncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts SnapshotOptions, remove func(string) error) (result SyncResult, resultErr error) {
 	started := time.Now().UTC()
 	snap, err := CreateSnapshot(ctx, opts)
-	result := SyncResult{Source: "desktop-macos", Since: opts.Since}
+	result = SyncResult{Source: "desktop-macos", Since: opts.Since}
+	cleanupAttempted := false
+	cleanup := func() error {
+		if cleanupAttempted || snap.Root == "" || opts.Keep {
+			return nil
+		}
+		cleanupAttempted = true
+		if err := remove(filepath.Dir(snap.Root)); err != nil {
+			result.Status = "partial"
+			err = fmt.Errorf("cleanup source snapshot: %w", err)
+			result.Warnings = append(result.Warnings, err.Error())
+			return err
+		}
+		result.SnapshotPath = ""
+		return nil
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
 	if opts.Concurrency > 1 {
 		result.Concurrency = opts.Concurrency
 	}
@@ -236,6 +294,7 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 		result.Warnings = append(result.Warnings, "no readable supported message tables were imported; source DBs may be encrypted or unsupported")
 	}
 	result.Status = status
+	err = errors.Join(err, mediaErr, cleanup())
 	finished := time.Now().UTC()
 	if err := arc.InsertSyncRun(ctx, archive.SyncRun{
 		RunID:               snap.RunID,
@@ -243,10 +302,10 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 		ProfileID:           snap.ProfileID,
 		StartedAt:           started.Format(time.RFC3339),
 		FinishedAt:          finished.Format(time.RFC3339),
-		Status:              status,
+		Status:              result.Status,
 		AppVersion:          opts.AppVersion,
 		SourceRoot:          opts.Profile.Root,
-		SnapshotPath:        snap.Root,
+		SnapshotPath:        result.SnapshotPath,
 		SourceDBCount:       int64(len(snap.DatabaseFiles)),
 		ImportedProfiles:    result.ImportedProfiles,
 		ImportedContacts:    result.ImportedContacts,
@@ -263,10 +322,6 @@ func SyncDesktopSnapshot(ctx context.Context, arc *archive.Archive, opts Snapsho
 		Warnings:            result.Warnings,
 	}); err != nil {
 		return result, err
-	}
-	if !opts.Keep {
-		_ = os.RemoveAll(filepath.Dir(snap.Root))
-		result.SnapshotPath = ""
 	}
 	return result, err
 }
@@ -442,10 +497,16 @@ type fileCopyTask struct {
 	metadata []byte
 }
 
-func copyDir(dst, src string, concurrency int) error {
+func copyDir(ctx context.Context, dst, src string, concurrency int) error {
 	var tasks []fileCopyTask
 	if err := filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry == nil || entry.IsDir() {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry == nil || entry.IsDir() {
 			return nil
 		}
 		rel, err := filepath.Rel(src, path)
@@ -457,7 +518,7 @@ func copyDir(dst, src string, concurrency int) error {
 	}); err != nil {
 		return err
 	}
-	return runCopyTasks(tasks, concurrency)
+	return runCopyTasks(ctx, tasks, concurrency)
 }
 
 func mediaKind(path string) string {
@@ -474,7 +535,17 @@ func mediaKind(path string) string {
 	}
 }
 
-func copyFile(dst, src string) error {
+func copyFile(ctx context.Context, dst, src string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("source must be a regular file")
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
@@ -487,17 +558,23 @@ func copyFile(dst, src string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err := io.Copy(out, contextReader{ctx, in}); err != nil {
 		_ = out.Close()
 		return err
 	}
 	return out.Close()
 }
 
-func copyDirMetadataOnly(dst, src string, concurrency int) error {
+func copyDirMetadataOnly(ctx context.Context, dst, src string, concurrency int) error {
 	var tasks []fileCopyTask
 	if err := filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry == nil || entry.IsDir() {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry == nil || entry.IsDir() {
 			return nil
 		}
 		rel, err := filepath.Rel(src, path)
@@ -506,7 +583,7 @@ func copyDirMetadataOnly(dst, src string, concurrency int) error {
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return nil
+			return err
 		}
 		meta := []byte(fmt.Sprintf("%s\t%d\t%s\n", rel, info.Size(), info.ModTime().UTC().Format(time.RFC3339)))
 		metaPath := filepath.Join(dst, rel+".metadata")
@@ -515,16 +592,16 @@ func copyDirMetadataOnly(dst, src string, concurrency int) error {
 	}); err != nil {
 		return err
 	}
-	return runCopyTasks(tasks, concurrency)
+	return runCopyTasks(ctx, tasks, concurrency)
 }
 
-func runCopyTasks(tasks []fileCopyTask, concurrency int) error {
+func runCopyTasks(ctx context.Context, tasks []fileCopyTask, concurrency int) error {
 	if concurrency < 1 {
 		concurrency = 1
 	}
 	if concurrency == 1 || len(tasks) <= 1 {
 		for _, task := range tasks {
-			if err := runCopyTask(task); err != nil {
+			if err := runCopyTask(ctx, task); err != nil {
 				return err
 			}
 		}
@@ -542,7 +619,7 @@ func runCopyTasks(tasks []fileCopyTask, concurrency int) error {
 		go func() {
 			defer wg.Done()
 			for task := range taskCh {
-				if err := runCopyTask(task); err != nil {
+				if err := runCopyTask(ctx, task); err != nil {
 					mu.Lock()
 					if firstErr == nil {
 						firstErr = err
@@ -560,25 +637,40 @@ func runCopyTasks(tasks []fileCopyTask, concurrency int) error {
 	return firstErr
 }
 
-func runCopyTask(task fileCopyTask) error {
+func runCopyTask(ctx context.Context, task fileCopyTask) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if task.metadata != nil {
 		if err := os.MkdirAll(filepath.Dir(task.dst), 0o700); err != nil {
 			return err
 		}
 		return os.WriteFile(task.dst, task.metadata, 0o600)
 	}
-	return copyFile(task.dst, task.src)
+	return copyFile(ctx, task.dst, task.src)
 }
 
-func fileSHA256(path string) (string, error) {
+type contextReader struct {
+	ctx context.Context
+	io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.Reader.Read(p)
+}
+
+func fileSHA256(ctx context.Context, path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
+	if _, err := io.Copy(hash, contextReader{ctx, file}); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return hex.EncodeToString(hash.Sum(nil)), ctx.Err()
 }

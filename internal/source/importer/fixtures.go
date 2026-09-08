@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -47,10 +48,31 @@ func ImportFixtureDatabases(ctx context.Context, arc *archive.Archive, profileID
 func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive, profileID string, files []File, opts Options) (Result, []string, error) {
 	var result Result
 	var warnings []string
+	var failures []error
+	var contentFiles []File
+	excludedStores := 0
 	for _, file := range files {
+		if strings.EqualFold(filepath.Base(file.Path), "key_info.db") {
+			excludedStores++
+		} else {
+			contentFiles = append(contentFiles, file)
+		}
+	}
+	if excludedStores > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d credential stores excluded from content import", excludedStores))
+	}
+	contentFiles, err := uniqueSourceFiles(contentFiles)
+	if err != nil {
+		return result, warnings, err
+	}
+	for _, file := range contentFiles {
+		if err := ctx.Err(); err != nil {
+			return result, warnings, errors.Join(append(failures, err)...)
+		}
 		src, err := ckstore.OpenReadOnly(ctx, file.Path)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: open readonly failed; likely encrypted or not sqlite", file.Role))
+			failures = append(failures, fmt.Errorf("%s: open readonly: %w", filepath.Base(file.Path), err))
 			continue
 		}
 		counts, err := importReadableDB(ctx, arc, src.DB(), profileID, file, opts)
@@ -68,9 +90,10 @@ func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive
 		result.RawRecords += counts.RawRecords
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %v", file.Role, err))
+			failures = append(failures, fmt.Errorf("%s: %w", filepath.Base(file.Path), err))
 		}
 	}
-	return result, warnings, nil
+	return result, warnings, errors.Join(failures...)
 }
 
 func importReadableDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, opts Options) (Result, error) {
@@ -395,6 +418,9 @@ func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, 
 	if err := rows.Err(); err != nil {
 		return result, err
 	}
+	if err := preflightNativeMessageIDs(ctx, arc, db, profileID, file, usernames, tables, opts); err != nil {
+		return result, err
+	}
 	for _, username := range usernames {
 		table := messageTableName(username)
 		if !tables[table] {
@@ -447,18 +473,25 @@ func importMessageTables(ctx context.Context, arc *archive.Archive, db *sql.DB, 
 			if sender == "" {
 				sender = username
 			}
+			messageID, err := resolveNativeMessageID(ctx, arc, profileID,
+				nativeMessageIdentity{file.Role, filepath.Base(file.Path), table, localID})
+			if err != nil {
+				_ = msgRows.Close()
+				return result, err
+			}
 			raw := map[string]any{
-				"source_db":    filepath.Base(file.Path),
-				"source_role":  file.Role,
-				"source_table": table,
-				"local_id":     localID,
-				"local_type":   localType,
-				"source":       sourceValue,
+				"native_identity_version": 2,
+				"source_db":               filepath.Base(file.Path),
+				"source_role":             file.Role,
+				"source_table":            table,
+				"local_id":                localID,
+				"local_type":              localType,
+				"source":                  sourceValue,
 			}
 			rawJSON, _ := json.Marshal(raw)
 			msg := archive.Message{
 				ProfileID:      profileID,
-				MessageID:      file.Role + ":" + table + ":" + strconv.FormatInt(localID, 10),
+				MessageID:      messageID,
 				ChatID:         username,
 				SenderID:       sender,
 				Direction:      directionFromSource(sourceValue),
@@ -747,7 +780,9 @@ func tableSet(ctx context.Context, db *sql.DB) (map[string]bool, error) {
 		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		out[name] = true
+		if !strings.EqualFold(name, "LoginKeyInfoTable") && !strings.EqualFold(name, "auth_cache") {
+			out[name] = true
+		}
 	}
 	return out, rows.Err()
 }

@@ -3,10 +3,14 @@ package desktopmac
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestDiscoverFindsProfilesDatabasesAndMediaDirs(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop discovery requires darwin")
+	}
 	root := t.TempDir()
 	container := filepath.Join(root, "container")
 	profileRoot := filepath.Join(container, XWeChatRelativeRoot, "wxid_fixture_abcd")

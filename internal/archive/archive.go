@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -193,6 +194,38 @@ func Open(ctx context.Context, path string) (*Archive, error) {
 	_, _ = st.DB().ExecContext(ctx, `alter table sync_runs add column imported_moments integer not null default 0`)
 	_, _ = st.DB().ExecContext(ctx, `alter table sync_runs add column imported_raw_records integer not null default 0`)
 	return &Archive{store: st}, nil
+}
+
+// OpenReadOnly observes an existing archive without initializing or migrating it.
+func OpenReadOnly(ctx context.Context, path string) (*Archive, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	st, err := ckstore.OpenReadOnly(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	arc := &Archive{store: st}
+	version, err := st.SchemaVersion(ctx)
+	if err == nil && version != schema.Version {
+		err = fmt.Errorf("archive schema version %d is not supported; initialize or migrate explicitly", version)
+	}
+	if err == nil {
+		_, err = st.Query(ctx, `select p.profile_id, m.message_id, m.chat_id, m.raw_json
+			from profiles p left join messages m on m.profile_id = p.profile_id limit 0`)
+	}
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("not a supported Weicrawl archive: %w", err)
+	}
+	return arc, nil
+}
+
+func (a *Archive) LastSuccessfulSyncAt(ctx context.Context) (string, error) {
+	var value string
+	err := a.DB().QueryRowContext(ctx, `select coalesce(max(finished_at),'') from sync_runs where status = 'success'`).Scan(&value)
+	return value, err
 }
 
 func (a *Archive) Close() error {

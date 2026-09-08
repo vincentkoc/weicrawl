@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -21,6 +22,9 @@ import (
 )
 
 func TestCLIEndToEndWithSyntheticDesktopFixture(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop discovery requires darwin")
+	}
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	configRoot := filepath.Join(root, "config")
@@ -962,6 +966,9 @@ func TestCLISyncDesktopBackup(t *testing.T) {
 }
 
 func TestCLISyncAllAggregatesConfiguredAndExplicitSources(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop discovery requires darwin")
+	}
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")
 	cacheRoot := filepath.Join(root, "cache")
@@ -1009,6 +1016,9 @@ func TestCLISyncAllAggregatesConfiguredAndExplicitSources(t *testing.T) {
 }
 
 func TestCLISyncDesktopMarksEncryptedLikeDBPartial(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop discovery requires darwin")
+	}
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")
 	cfgPath := filepath.Join(configRoot, "weicrawl", "config.toml")
@@ -1061,6 +1071,9 @@ func TestCLISyncDesktopMarksEncryptedLikeDBPartial(t *testing.T) {
 }
 
 func TestCLISyncAllPropagatesPartialSourceStatus(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop discovery requires darwin")
+	}
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")
 	cfgPath := filepath.Join(configRoot, "weicrawl", "config.toml")
@@ -1145,6 +1158,9 @@ app_secret_env = "APP_SECRET_ENV"
 }
 
 func TestCLIImportsNativeReadableWeChatShape(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop discovery requires darwin")
+	}
 	root := t.TempDir()
 	configRoot := filepath.Join(root, "config")
 	cfgPath := filepath.Join(configRoot, "weicrawl", "config.toml")
