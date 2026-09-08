@@ -49,7 +49,19 @@ func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive
 	var result Result
 	var warnings []string
 	var failures []error
+	var contentFiles []File
+	excludedStores := 0
 	for _, file := range files {
+		if strings.EqualFold(filepath.Base(file.Path), "key_info.db") {
+			excludedStores++
+		} else {
+			contentFiles = append(contentFiles, file)
+		}
+	}
+	if excludedStores > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d credential stores excluded from content import", excludedStores))
+	}
+	for _, file := range contentFiles {
 		if err := ctx.Err(); err != nil {
 			return result, warnings, errors.Join(append(failures, err)...)
 		}
@@ -754,7 +766,9 @@ func tableSet(ctx context.Context, db *sql.DB) (map[string]bool, error) {
 		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		out[name] = true
+		if !strings.EqualFold(name, "LoginKeyInfoTable") && !strings.EqualFold(name, "auth_cache") {
+			out[name] = true
+		}
 	}
 	return out, rows.Err()
 }

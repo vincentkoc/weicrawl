@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Exclude recognized credential stores and tables before content import, and
+  omit recognized legacy credential-table rows from all/raw exports without
+  deleting retained history or changing explicit key workflows.
+
 - Use published crawlkit v0.14.7 without a sibling checkout, with standalone CI.
   The minimum Go version is now 1.26.6.
 - Reject overlapping decryption paths and require owned roots for automatic
