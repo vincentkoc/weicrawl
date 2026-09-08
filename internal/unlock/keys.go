@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/vincentkoc/weicrawl/internal/safefile"
 	_ "modernc.org/sqlite"
 )
 
@@ -26,16 +27,18 @@ type KeyManifest struct {
 }
 
 type DecryptOptions struct {
-	SnapshotDir   string
-	OutputDir     string
-	KeysPath      string
-	SQLCipherPath string
+	SnapshotDir        string
+	OutputDir          string
+	KeysPath           string
+	SQLCipherPath      string
+	RequireOwnedOutput bool
 }
 
 type DecryptResult struct {
 	SnapshotDir string         `json:"snapshot_dir"`
 	OutputDir   string         `json:"output_dir"`
 	SQLCipher   string         `json:"sqlcipher"`
+	OwnedOutput bool           `json:"owned_output"`
 	Decrypted   []DecryptEntry `json:"decrypted,omitempty"`
 	Skipped     []DecryptEntry `json:"skipped,omitempty"`
 }
@@ -294,7 +297,17 @@ func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, er
 	if strings.TrimSpace(outputPath) == "" {
 		outputPath = "wechat_keys.json"
 	}
+	if info, err := os.Lstat(outputPath); err == nil && !info.Mode().IsRegular() {
+		return false, errors.New("key manifest output must be a regular file")
+	}
 	if _, err := ReadKeyManifest(outputPath); err == nil {
+		bytes, err := os.ReadFile(outputPath)
+		if err != nil {
+			return false, err
+		}
+		if err := safefile.WriteBytes(outputPath, bytes); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 	if manifestBytes, ok := stdoutManifest(output); ok {
@@ -304,7 +317,7 @@ func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, er
 			}
 		}
 		bytes := append(manifestBytes, '\n')
-		if err := os.WriteFile(outputPath, bytes, 0o600); err != nil {
+		if err := safefile.WriteBytes(outputPath, bytes); err != nil {
 			return false, fmt.Errorf("write key manifest: %w", err)
 		}
 		return true, nil
@@ -325,7 +338,7 @@ func WriteDefaultKeyManifestFromScan(output []byte, outputPath string) (bool, er
 			return false, err
 		}
 		bytes = append(bytes, '\n')
-		if err := os.WriteFile(outputPath, bytes, 0o600); err != nil {
+		if err := safefile.WriteBytes(outputPath, bytes); err != nil {
 			return false, fmt.Errorf("write key manifest: %w", err)
 		}
 		return true, nil
@@ -502,6 +515,23 @@ func DecryptSnapshot(ctx context.Context, opts DecryptOptions) (DecryptResult, e
 	if err != nil {
 		return result, err
 	}
+	if err := safefile.RejectOverlap(opts.SnapshotDir, opts.OutputDir); err != nil {
+		return result, err
+	}
+	if err := os.MkdirAll(filepath.Dir(opts.OutputDir), 0o700); err != nil {
+		return result, err
+	}
+	if err := os.Mkdir(opts.OutputDir, 0o700); err == nil {
+		result.OwnedOutput = true
+	} else {
+		if !errors.Is(err, os.ErrExist) || opts.RequireOwnedOutput {
+			return result, fmt.Errorf("automatic cleanup requires a new output directory: %w", err)
+		}
+		info, statErr := os.Stat(opts.OutputDir)
+		if statErr != nil || !info.IsDir() {
+			return result, fmt.Errorf("decryption output must be a directory: %w", err)
+		}
+	}
 	relPaths := make([]string, 0, len(resolved))
 	for rel := range resolved {
 		relPaths = append(relPaths, rel)
@@ -522,6 +552,9 @@ func DecryptSnapshot(ctx context.Context, opts DecryptOptions) (DecryptResult, e
 	}
 	if len(result.Decrypted) == 0 {
 		return result, errors.New("no databases were decrypted")
+	}
+	if len(result.Skipped) > 0 {
+		return result, fmt.Errorf("partial decryption; recovery output retained at %s", result.OutputDir)
 	}
 	return result, nil
 }
@@ -729,28 +762,52 @@ func FindSQLCipher(configured string) (string, error) {
 }
 
 func decryptOne(ctx context.Context, sqlcipher, src, dst, keyHex string) error {
+	if err := safefile.RejectAliases(dst, src, src+"-wal", src+"-shm"); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
-	_ = os.Remove(dst)
+	stageDir, err := os.MkdirTemp(filepath.Dir(dst), ".decrypt-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stageDir)
+	staged := filepath.Join(stageDir, "plaintext.db")
 	commands := fmt.Sprintf(`PRAGMA key = "x'%s'";
 PRAGMA cipher_page_size = 4096;
 ATTACH DATABASE '%s' AS plaintext KEY '';
 SELECT sqlcipher_export('plaintext');
 DETACH DATABASE plaintext;
-`, keyHex, strings.ReplaceAll(dst, `'`, `''`))
+`, keyHex, strings.ReplaceAll(staged, `'`, `''`))
 	cmd := exec.CommandContext(ctx, sqlcipher, src)
 	cmd.Stdin = strings.NewReader(commands)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("sqlcipher decrypt failed: %s", strings.TrimSpace(string(output)))
 	}
-	if info, err := os.Stat(dst); err != nil {
+	if info, err := os.Stat(staged); err != nil {
 		return fmt.Errorf("decrypted output missing: %w", err)
 	} else if info.Size() == 0 {
 		return errors.New("decrypted output is empty")
 	}
-	return nil
+	if err := os.Chmod(staged, 0o600); err != nil {
+		return err
+	}
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(staged))
+	if err != nil {
+		return err
+	}
+	var health string
+	checkErr := db.QueryRowContext(ctx, "pragma quick_check").Scan(&health)
+	closeErr := db.Close()
+	if checkErr != nil || health != "ok" {
+		return fmt.Errorf("decrypted output is not a valid SQLite database: %v", checkErr)
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(staged, dst)
 }
 
 func probeOne(ctx context.Context, sqlcipher, src, keyHex string) error {

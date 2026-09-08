@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -47,10 +48,15 @@ func ImportFixtureDatabases(ctx context.Context, arc *archive.Archive, profileID
 func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive, profileID string, files []File, opts Options) (Result, []string, error) {
 	var result Result
 	var warnings []string
+	var failures []error
 	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return result, warnings, errors.Join(append(failures, err)...)
+		}
 		src, err := ckstore.OpenReadOnly(ctx, file.Path)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: open readonly failed; likely encrypted or not sqlite", file.Role))
+			failures = append(failures, fmt.Errorf("%s: open readonly: %w", filepath.Base(file.Path), err))
 			continue
 		}
 		counts, err := importReadableDB(ctx, arc, src.DB(), profileID, file, opts)
@@ -68,9 +74,10 @@ func ImportFixtureDatabasesWithOptions(ctx context.Context, arc *archive.Archive
 		result.RawRecords += counts.RawRecords
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %v", file.Role, err))
+			failures = append(failures, fmt.Errorf("%s: %w", filepath.Base(file.Path), err))
 		}
 	}
-	return result, warnings, nil
+	return result, warnings, errors.Join(failures...)
 }
 
 func importReadableDB(ctx context.Context, arc *archive.Archive, db *sql.DB, profileID string, file File, opts Options) (Result, error) {

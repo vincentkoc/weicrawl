@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,6 +22,7 @@ import (
 	cktui "github.com/openclaw/crawlkit/tui"
 	"github.com/vincentkoc/weicrawl/internal/archive"
 	"github.com/vincentkoc/weicrawl/internal/config"
+	"github.com/vincentkoc/weicrawl/internal/safefile"
 	"github.com/vincentkoc/weicrawl/internal/schema"
 	"github.com/vincentkoc/weicrawl/internal/source/backup"
 	"github.com/vincentkoc/weicrawl/internal/source/desktopmac"
@@ -193,6 +195,9 @@ func (e env) runInit(args []string) error {
 	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(e.global.dbPath) != "" {
+		loaded.Config.Archive.DBPath = config.Expand(e.global.dbPath)
+	}
 	arc, err := archive.Open(e.ctx, loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
@@ -301,7 +306,7 @@ func (e env) runDoctor(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	arc, dbErr := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+	arc, dbErr := archive.OpenReadOnly(e.ctx, e.loaded.Config.Archive.DBPath)
 	var schemaVersion int
 	ftsOK := false
 	var ftsErr error
@@ -433,8 +438,15 @@ func keyInfoPaths(files []desktopmac.DBFile) []string {
 }
 
 func (e env) runStatus() error {
-	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+	arc, err := archive.OpenReadOnly(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			status := control.NewStatus("weicrawl", "local WeChat archive")
+			status.State = "unconfigured"
+			status.DatabasePath = e.loaded.Config.Archive.DBPath
+			status.Warnings = []string{"archive is missing; run init explicitly"}
+			return e.write("status", map[string]any{"control": status})
+		}
 		return err
 	}
 	defer arc.Close()
@@ -463,11 +475,17 @@ func (e env) runStatus() error {
 		control.NewCount("biz_articles", "Public-account articles", status.PublicAccountArticleCount),
 		control.NewCount("moments", "Moments", status.MomentCount),
 	}
-	if status.LastSyncRun != nil {
-		ckStatus.LastSyncAt = status.LastSyncRun.FinishedAt
+	ckStatus.LastSyncAt, err = arc.LastSuccessfulSyncAt(e.ctx)
+	if err != nil {
+		return err
+	}
+	if status.LastSyncRun != nil && status.LastSyncRun.Status != "success" {
+		ckStatus.State = "degraded"
+		ckStatus.Warnings = append(ckStatus.Warnings, status.LastSyncRun.Warnings...)
+		ckStatus.Warnings = append(ckStatus.Warnings, "last sync attempt: "+status.LastSyncRun.Status)
 	}
 	disc := desktopmac.Discover(e.ctx, e.loaded.Config.DesktopMacOS.ContainerPath)
-	statusWarnings := append([]string{}, disc.Warnings...)
+	statusWarnings := append(ckStatus.Warnings, disc.Warnings...)
 	if disc.EncryptedDBCount > 0 && status.MessageCount == 0 {
 		statusWarnings = append(statusWarnings, "desktop databases appear encrypted and no messages are imported; run sync with --keep-source-snapshot, then unlock with an explicit key manifest")
 	}
@@ -869,11 +887,17 @@ func (e env) runUnlock(args []string) error {
 		if strings.TrimSpace(*snapshotPath) == "" || strings.TrimSpace(*outDir) == "" {
 			return output.UsageError{Err: errors.New("unlock desktop with --keys requires --snapshot and --out")}
 		}
+		if *syncAfterUnlock {
+			if err := safefile.RejectOverlap(config.Expand(*outDir), e.loaded.Config.Archive.DBPath); err != nil {
+				return fmt.Errorf("decrypted output must be separate from the archive: %w", err)
+			}
+		}
 		result, err := unlock.DecryptSnapshot(e.ctx, unlock.DecryptOptions{
-			SnapshotDir:   config.Expand(*snapshotPath),
-			OutputDir:     config.Expand(*outDir),
-			KeysPath:      config.Expand(*keysPath),
-			SQLCipherPath: config.Expand(*sqlcipherPath),
+			SnapshotDir:        config.Expand(*snapshotPath),
+			OutputDir:          config.Expand(*outDir),
+			KeysPath:           config.Expand(*keysPath),
+			SQLCipherPath:      config.Expand(*sqlcipherPath),
+			RequireOwnedOutput: *syncAfterUnlock && !*keepDecrypted,
 		})
 		if err != nil {
 			return err
@@ -892,6 +916,10 @@ func (e env) runUnlock(args []string) error {
 			"next":        fmt.Sprintf("run `weicrawl sync --source desktop-macos --profile %s --decrypted-dir %s`", nextProfile, result.OutputDir),
 		}
 		if *syncAfterUnlock {
+			// The created root now has filesystem identity, including case aliases.
+			if err := safefile.RejectOverlap(result.OutputDir, e.loaded.Config.Archive.DBPath); err != nil {
+				return fmt.Errorf("decrypted output must be separate from the archive: %w", err)
+			}
 			arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
 			if err != nil {
 				return err
@@ -902,7 +930,7 @@ func (e env) runUnlock(args []string) error {
 				return err
 			}
 			payload["sync"] = syncResult
-			if !*keepDecrypted {
+			if !*keepDecrypted && result.OwnedOutput && syncResult.Status == "success" {
 				if err := os.RemoveAll(result.OutputDir); err != nil {
 					return fmt.Errorf("remove decrypted output: %w", err)
 				}
@@ -1043,7 +1071,7 @@ func (e env) runList(table string, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+	arc, err := archive.OpenReadOnly(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
 	}
@@ -1069,7 +1097,7 @@ func (e env) runSearch(args []string) error {
 	if query == "" {
 		return output.UsageError{Err: errors.New("search query is required")}
 	}
-	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+	arc, err := archive.OpenReadOnly(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
 	}
@@ -1093,7 +1121,7 @@ func (e env) runSQL(args []string) error {
 	if !isReadOnlySQL(query) {
 		return output.UsageError{Err: errors.New("sql is read-only; use select, with, or read-only pragma statements")}
 	}
-	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+	arc, err := archive.OpenReadOnly(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
 	}
@@ -1159,7 +1187,7 @@ func (e env) runSnapshot(args []string) error {
 		if strings.TrimSpace(*outDir) == "" {
 			return output.UsageError{Err: errors.New("--out is required")}
 		}
-		arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+		arc, err := archive.OpenReadOnly(e.ctx, e.loaded.Config.Archive.DBPath)
 		if err != nil {
 			return err
 		}
@@ -1488,7 +1516,7 @@ func (e env) runExport(args []string) error {
 	if strings.TrimSpace(*outPath) == "" {
 		return output.UsageError{Err: errors.New("--out is required")}
 	}
-	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+	arc, err := archive.OpenReadOnly(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
 	}
@@ -1515,56 +1543,60 @@ func (e env) exportJSONL(arc *archive.Archive, path, scope string) error {
 	if err != nil {
 		return output.UsageError{Err: err}
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := safefile.RejectAliases(path, arc.Path(), arc.Path()+"-wal", arc.Path()+"-shm", arc.Path()+"-journal"); err != nil {
 		return err
 	}
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	enc := json.NewEncoder(file)
 	rowsWritten := 0
 	counts := map[string]int{}
-	for _, export := range queries {
-		result, err := arc.Query(e.ctx, export.Query)
-		if err != nil {
-			_ = file.Close()
-			return err
-		}
-		for _, row := range result.Values {
-			row["entity"] = export.Entity
-			if err := enc.Encode(row); err != nil {
-				_ = file.Close()
+	err = safefile.Write(path, func(file *os.File) error {
+		enc := json.NewEncoder(file)
+		for _, export := range queries {
+			result, err := arc.Query(e.ctx, export.Query)
+			if err != nil {
 				return err
 			}
-			rowsWritten++
-			counts[export.Entity]++
+			for _, row := range result.Values {
+				row["entity"] = export.Entity
+				if err := enc.Encode(row); err != nil {
+					return err
+				}
+				rowsWritten++
+				counts[export.Entity]++
+			}
 		}
-	}
-	if err := file.Close(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	return e.write("export", map[string]any{"path": path, "format": "jsonl", "scope": scope, "rows": rowsWritten, "counts": counts})
 }
 
 func (e env) exportMarkdown(arc *archive.Archive, dir string) error {
-	result, err := arc.Query(e.ctx, `select chat_id, coalesce(sender_id,''), message_type, coalesce(sent_at,''), text from messages order by chat_id, coalesce(sent_at,''), message_id`)
+	result, err := arc.Query(e.ctx, `select profile_id, chat_id, coalesce(sender_id,'') as sender_id, message_type, coalesce(sent_at,'') as sent_at, text from messages order by profile_id, chat_id, coalesce(sent_at,''), message_id`)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	files := map[string][]string{}
+	type chatKey struct{ profile, chat string }
+	files := map[chatKey][]string{}
 	for _, row := range result.Values {
 		chatID := fmt.Sprint(row["chat_id"])
 		line := fmt.Sprintf("- `%s` **%s** [%s]: %s", row["sent_at"], row["sender_id"], row["message_type"], row["text"])
-		files[chatID] = append(files[chatID], line)
+		key := chatKey{fmt.Sprint(row["profile_id"]), chatID}
+		files[key] = append(files[key], line)
 	}
-	for chatID, lines := range files {
-		path := filepath.Join(dir, safeMarkdownName(chatID)+".md")
-		body := "# " + chatID + "\n\n" + strings.Join(lines, "\n") + "\n"
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	for key, lines := range files {
+		identity, _ := json.Marshal([]string{key.profile, key.chat})
+		hash := sha256.Sum256(identity)
+		path := filepath.Join(dir, fmt.Sprintf("%s-%x.md", safeMarkdownName(key.chat), hash))
+		body := "# " + key.chat + "\n\nProfile: " + key.profile + "\n\n" + strings.Join(lines, "\n") + "\n"
+		if err := safefile.RejectAliases(path, arc.Path(), arc.Path()+"-wal", arc.Path()+"-shm"); err != nil {
+			return err
+		}
+		if err := safefile.WriteBytes(path, []byte(body)); err != nil {
 			return err
 		}
 	}
@@ -1633,7 +1665,7 @@ func (e env) runTUI(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	arc, err := archive.Open(e.ctx, e.loaded.Config.Archive.DBPath)
+	arc, err := archive.OpenReadOnly(e.ctx, e.loaded.Config.Archive.DBPath)
 	if err != nil {
 		return err
 	}
