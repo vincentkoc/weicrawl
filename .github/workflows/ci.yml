@@ -14,23 +14,28 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        go: ["1.26.8", "1.27.1"]
+        go: ["1.27.0", "1.27.1"]
     env:
       GOWORK: "off"
       GOTOOLCHAIN: "local"
       GOMAXPROCS: "2"
       GOFLAGS: "-p=1"
+      EXPECTED_GO: ${{ matrix.go }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
           cache: true
+      - name: Verify toolchain
+        run: |
+          go version
+          test "$(go env GOVERSION)" = "go${EXPECTED_GO}"
       - run: go mod download
       - run: go mod tidy
       - run: git diff --exit-code -- go.mod go.sum
       - run: go mod verify
-      - run: go build ./cmd/weicrawl
+      - run: go build ./...
       - run: go vet ./...
       - run: go test -count=1 -timeout=120s ./...
         env:

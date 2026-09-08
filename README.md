@@ -216,9 +216,15 @@ go run ./cmd/weicrawl --json export --format markdown --out exports/markdown
 
 ## validation
 
+Source builds require Go 1.27.0 or newer for crawlkit v0.15.0; Go 1.27.1 is
+the preferred toolchain. CI checks both versions without automatic toolchain
+switching. New macOS builds require macOS 13 Ventura or newer; this does not
+change the requirements of previously released binaries.
+
 ```bash
 GOWORK=off go mod tidy
 git diff --exit-code -- go.mod go.sum
+GOWORK=off go build ./...
 GOWORK=off go vet ./...
 GOWORK=off go test -count=1 ./...
 ```
